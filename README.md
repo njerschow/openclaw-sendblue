@@ -16,65 +16,52 @@ Sendblue channel adapter for [clawdbot](https://clawd.bot) - enables iMessage/SM
 2. Get your **API Key** and **API Secret** from Dashboard → API Keys
 3. Note your assigned **phone number**
 
-### 2. Install
+### 2. Install the Adapter
 
 ```bash
+git clone https://github.com/njerschow/clawdbot-sendblue.git
 cd clawdbot-sendblue
 npm install
 npm run build
 ```
 
-### 3. Configure Environment
+### 3. Configure Clawdbot
 
-```bash
-export SENDBLUE_API_KEY="your-api-key"
-export SENDBLUE_API_SECRET="your-api-secret"
-export SENDBLUE_PHONE_NUMBER="+15551234567"
-export SENDBLUE_ALLOWLIST="+15559876543,+15551111111"  # Optional
-export PORT=18790  # Optional, default 18790
-```
-
-### 4. Run Standalone (for testing)
-
-```bash
-npm start
-# or
-npm run dev
-```
-
-### 5. Configure Clawdbot
-
-Add to `~/.clawdbot/clawdbot.json`:
+Create or edit `~/.clawdbot/clawdbot.json` (create the file if it doesn't exist):
 
 ```json5
 {
   channels: {
     sendblue: {
-      // Adapter daemon configuration
       adapter: {
         command: "node",
         args: ["/path/to/clawdbot-sendblue/dist/index.js"],
         env: {
-          SENDBLUE_API_KEY: "${SENDBLUE_API_KEY}",
-          SENDBLUE_API_SECRET: "${SENDBLUE_API_SECRET}",
-          SENDBLUE_PHONE_NUMBER: "${SENDBLUE_PHONE_NUMBER}",
-          SENDBLUE_ALLOWLIST: "${SENDBLUE_ALLOWLIST}",
+          SENDBLUE_API_KEY: "sb-api-key-xxxxx",
+          SENDBLUE_API_SECRET: "sb-secret-xxxxx",
+          SENDBLUE_PHONE_NUMBER: "+15551234567",
+          SENDBLUE_ALLOWLIST: "+15559876543,+15551111111",
+          SENDBLUE_POLL_INTERVAL_MS: "5000",
           PORT: "18790"
         }
       },
-
-      // Access control
-      allowFrom: ["${SENDBLUE_ALLOWLIST}"],
+      allowFrom: ["+15559876543", "+15551111111"],
       dmPolicy: "allowlist"
     }
   }
 }
 ```
 
-## Environment Variables
+Replace the values with your actual Sendblue credentials and phone numbers.
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
+### 4. Restart Clawdbot
+
+The adapter will start automatically when clawdbot loads the channel.
+
+## Configuration Options
+
+| Option | Required | Default | Description |
+|--------|----------|---------|-------------|
 | `SENDBLUE_API_KEY` | Yes | - | Sendblue API key |
 | `SENDBLUE_API_SECRET` | Yes | - | Sendblue API secret |
 | `SENDBLUE_PHONE_NUMBER` | Yes | - | Your Sendblue phone number |
@@ -82,7 +69,50 @@ Add to `~/.clawdbot/clawdbot.json`:
 | `SENDBLUE_POLL_INTERVAL_MS` | No | 5000 | Polling interval in milliseconds |
 | `PORT` | No | 18790 | HTTP server port |
 
-## API Endpoints
+## Standalone Testing
+
+To test the adapter without clawdbot:
+
+```bash
+# Set environment variables
+export SENDBLUE_API_KEY="sb-api-key-xxxxx"
+export SENDBLUE_API_SECRET="sb-secret-xxxxx"
+export SENDBLUE_PHONE_NUMBER="+15551234567"
+
+# Run
+npm start
+# or for development
+npm run dev
+```
+
+Then test the endpoints:
+
+```bash
+# Health check
+curl http://localhost:18790/api/v1/check
+
+# Subscribe to SSE events (in another terminal)
+curl -N http://localhost:18790/api/v1/events
+
+# Start polling
+curl -X POST http://localhost:18790/api/v1/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"method":"watch.subscribe","id":1}'
+
+# Send a test message
+curl -X POST http://localhost:18790/api/v1/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"method":"send","params":{"to":"+15559876543","content":"Hello!"},"id":2}'
+
+# List chats
+curl -X POST http://localhost:18790/api/v1/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"method":"chats.list","id":3}'
+```
+
+## API Reference
+
+### Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -90,61 +120,57 @@ Add to `~/.clawdbot/clawdbot.json`:
 | `/api/v1/events` | GET | SSE event stream |
 | `/api/v1/rpc` | POST | JSON-RPC handler |
 
-## JSON-RPC Methods
+### JSON-RPC Methods
 
-### `watch.subscribe`
+#### `watch.subscribe`
 Start polling Sendblue for new messages.
 ```json
 { "method": "watch.subscribe", "id": 1 }
 → { "result": { "subscribed": true }, "id": 1 }
 ```
 
-### `watch.unsubscribe`
+#### `watch.unsubscribe`
 Stop polling.
 ```json
 { "method": "watch.unsubscribe", "id": 2 }
 → { "result": { "unsubscribed": true }, "id": 2 }
 ```
 
-### `send`
+#### `send`
 Send a message via Sendblue.
 ```json
 {
   "method": "send",
-  "params": {
-    "to": "+15559876543",
-    "content": "Hello from clawdbot!",
-    "media_url": "https://..." // optional
-  },
+  "params": { "to": "+15559876543", "content": "Hello!", "media_url": "https://..." },
   "id": 3
 }
 → { "result": { "messageId": "..." }, "id": 3 }
 ```
 
-### `chats.list`
+#### `chats.list`
 Get list of all conversations.
 ```json
 { "method": "chats.list", "id": 4 }
 → { "result": { "chats": [...] }, "id": 4 }
 ```
 
-### `chats.history`
+#### `chats.history`
 Get conversation history.
 ```json
 { "method": "chats.history", "params": { "chat_id": "+15559876543", "limit": 50 }, "id": 5 }
 → { "result": { "messages": [...] }, "id": 5 }
 ```
 
-### `status`
+#### `status`
 Get adapter status.
 ```json
 { "method": "status", "id": 6 }
 → { "result": { "running": true, "version": "1.0.0" }, "id": 6 }
 ```
 
-## SSE Events
+### SSE Events
 
-When a new message arrives, the adapter broadcasts via SSE:
+When a new message arrives:
 
 ```json
 {
@@ -155,40 +181,14 @@ When a new message arrives, the adapter broadcasts via SSE:
     "content": "Hello!",
     "timestamp": 1706000000000,
     "message_id": "msg-abc123",
-    "media_url": "https://..." // if media attached
+    "media_url": "https://..."
   }
 }
 ```
 
-## Testing
-
-```bash
-# Health check
-curl http://localhost:18790/api/v1/check
-
-# Subscribe to events
-curl -N http://localhost:18790/api/v1/events
-
-# Start polling
-curl -X POST http://localhost:18790/api/v1/rpc \
-  -H "Content-Type: application/json" \
-  -d '{"method":"watch.subscribe","id":1}'
-
-# Send message
-curl -X POST http://localhost:18790/api/v1/rpc \
-  -H "Content-Type: application/json" \
-  -d '{"method":"send","params":{"to":"+15559876543","content":"Test"},"id":2}'
-
-# List chats
-curl -X POST http://localhost:18790/api/v1/rpc \
-  -H "Content-Type: application/json" \
-  -d '{"method":"chats.list","id":3}'
-```
-
 ## Data Storage
 
-The adapter stores data in `~/.config/clawdbot-sendblue/`:
-- `adapter.db` - SQLite database for message deduplication and conversation history
+The adapter stores data in `~/.config/clawdbot-sendblue/adapter.db` (SQLite) for message deduplication and conversation history.
 
 ## Architecture
 
