@@ -10,12 +10,11 @@ export interface SendblueChannelConfig {
   allowFrom?: string[];
   pollIntervalMs?: number;
   dmPolicy?: 'allowlist' | 'open' | 'disabled';
-  // Webhook configuration
-  webhook?: {
-    enabled: boolean;
-    port?: number;        // Default: 3141
-    path?: string;        // Default: /webhook/sendblue
-  };
+  
+  // Webhook configuration (recommended for real-time delivery)
+  // Uses Clawdbot's gateway HTTP server - no separate port needed
+  webhookPath?: string;      // e.g., '/webhook/sendblue' (enables webhook mode)
+  webhookSecret?: string;    // Optional: verify x-sendblue-secret header
 }
 
 // Sendblue API message format
