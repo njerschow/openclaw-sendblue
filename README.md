@@ -1,35 +1,37 @@
 # clawdbot-sendblue
 
-Clawdbot plugin for iMessage/SMS messaging via the [Sendblue](https://sendblue.co) API.
+Text your [clawdbot](https://clawd.bot) via iMessage or SMS.
 
-## Why?
+This plugin connects clawdbot to [Sendblue](https://sendblue.co), letting you chat with your AI assistant by texting a phone number.
 
-- **No Mac Required**: Unlike BlueBubbles, Sendblue is cloud-based - works from any server
-- **Free Tier**: Sendblue offers a free developer tier for testing
-- **Simple Setup**: Just API keys, no local daemons or QR codes
-- **Native Integration**: Registers as a clawdbot channel plugin
+## Prerequisites
 
-## Quick Start
+- [clawdbot](https://clawd.bot) installed and running
+- [Node.js](https://nodejs.org) 18+
+- A Sendblue account (free tier available)
 
-### 1. Get Sendblue Credentials
+## Setup
 
-1. Sign up at [dashboard.sendblue.com](https://dashboard.sendblue.com/company-signup)
-2. Get your **API Key** and **API Secret** from Dashboard → API Keys
-3. Note your assigned **phone number**
+### Step 1: Get Sendblue Credentials
 
-### 2. Install the Plugin
+1. Sign up at [sendblue.co](https://sendblue.co)
+2. Go to **Dashboard → API Keys**
+3. Copy your **API Key** (starts with `sb-api-key-`)
+4. Copy your **API Secret** (starts with `sb-secret-`)
+5. Note your **phone number** (shown in dashboard, format: `+15551234567`)
+
+### Step 2: Install the Plugin
 
 ```bash
-# Clone to clawdbot extensions directory
 git clone https://github.com/njerschow/clawdbot-sendblue ~/.clawdbot/extensions/sendblue
 cd ~/.clawdbot/extensions/sendblue
 npm install
 npm run build
 ```
 
-### 3. Configure Clawdbot
+### Step 3: Configure
 
-Edit `~/.clawdbot/clawdbot.json`:
+Edit `~/.clawdbot/clawdbot.json` (create it if it doesn't exist):
 
 ```json
 {
@@ -38,60 +40,90 @@ Edit `~/.clawdbot/clawdbot.json`:
       "apiKey": "sb-api-key-xxxxx",
       "apiSecret": "sb-secret-xxxxx",
       "phoneNumber": "+15551234567",
-      "allowFrom": ["+15559876543", "+15551111111"],
-      "pollIntervalMs": 5000,
-      "dmPolicy": "allowlist"
+      "allowFrom": ["+15559876543"]
     }
   }
 }
 ```
 
-Replace the values with your actual Sendblue credentials.
+Replace:
+- `apiKey` → your Sendblue API key
+- `apiSecret` → your Sendblue API secret
+- `phoneNumber` → your Sendblue phone number
+- `allowFrom` → your personal phone number(s) that can text the bot
 
-### 4. Restart Clawdbot
+> **Note:** If you already have a `clawdbot.json`, just add the `sendblue` section inside `channels`.
 
-The plugin will automatically register the Sendblue channel on startup.
+### Step 4: Restart Clawdbot
+
+```bash
+# If running as a service
+clawdbot restart
+
+# Or just restart the process manually
+```
+
+### Step 5: Test It
+
+Text your Sendblue number from your phone. You should get a response from clawdbot!
 
 ## Configuration Options
 
-| Option | Required | Default | Description |
-|--------|----------|---------|-------------|
-| `apiKey` | Yes | - | Sendblue API key |
-| `apiSecret` | Yes | - | Sendblue API secret |
-| `phoneNumber` | Yes | - | Your Sendblue phone number (E.164 format) |
-| `allowFrom` | No | (all) | Array of phone numbers to accept messages from |
-| `pollIntervalMs` | No | 5000 | How often to poll for new messages (ms) |
-| `dmPolicy` | No | allowlist | `"allowlist"`, `"open"`, or `"disabled"` |
+| Option | Required | Description |
+|--------|----------|-------------|
+| `apiKey` | Yes | Your Sendblue API key |
+| `apiSecret` | Yes | Your Sendblue API secret |
+| `phoneNumber` | Yes | Your Sendblue phone number |
+| `allowFrom` | No | Phone numbers allowed to text the bot |
+| `dmPolicy` | No | `"allowlist"` (default), `"open"`, or `"disabled"` |
+| `pollIntervalMs` | No | Poll interval in ms (default: 5000) |
 
-## DM Policy Options
+### Who Can Text the Bot?
 
-- **allowlist**: Only accept messages from numbers in `allowFrom`
-- **open**: Accept messages from any number
-- **disabled**: Don't accept any inbound messages
+By default, only numbers in `allowFrom` can text the bot. To let anyone text:
 
-## Architecture
-
-```
-User (iPhone)
-     │
-     ▼ iMessage/SMS
-┌─────────────────┐
-│  Sendblue API   │
-└────────┬────────┘
-         │ poll
-         ▼
-┌─────────────────────────────┐
-│  Clawdbot Gateway           │
-│  └── sendblue plugin        │
-│      • Polls for messages   │
-│      • Registers channel    │
-│      • Routes to clawdbot   │
-└─────────────────────────────┘
+```json
+{
+  "channels": {
+    "sendblue": {
+      "apiKey": "...",
+      "apiSecret": "...",
+      "phoneNumber": "...",
+      "dmPolicy": "open"
+    }
+  }
+}
 ```
 
-## Data Storage
+## Troubleshooting
 
-Message deduplication data is stored in `~/.config/clawdbot-sendblue/adapter.db` (SQLite).
+**"Unknown channel id" error**
+- Make sure you ran `npm run build` after cloning
+- Check that the plugin is in `~/.clawdbot/extensions/sendblue`
+
+**Not receiving messages**
+- Verify your phone number is in `allowFrom` (or set `dmPolicy` to `"open"`)
+- Check that your Sendblue credentials are correct
+- Look at clawdbot logs for errors
+
+**Messages not sending**
+- Verify your Sendblue account is active
+- Check your API credentials
+
+## How It Works
+
+```
+Your Phone
+    │
+    ▼ iMessage/SMS
+Sendblue (cloud)
+    │
+    ▼ polls every 5s
+clawdbot + this plugin
+    │
+    ▼ AI response
+Sendblue → Your Phone
+```
 
 ## License
 
