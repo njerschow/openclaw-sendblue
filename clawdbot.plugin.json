@@ -25,7 +25,15 @@
         "properties": {
           "enabled": { "type": "boolean", "default": false },
           "port": { "type": "number", "default": 3141 },
-          "path": { "type": "string", "default": "/webhook/sendblue" }
+          "path": { "type": "string", "default": "/webhook/sendblue" },
+          "secret": { "type": "string" },
+          "rateLimit": {
+            "type": "object",
+            "properties": {
+              "windowMs": { "type": "number", "default": 60000 },
+              "maxRequests": { "type": "number", "default": 60 }
+            }
+          }
         }
       }
     },
@@ -40,6 +48,9 @@
     "dmPolicy": { "label": "DM Policy" },
     "webhook.enabled": { "label": "Enable Webhook Server" },
     "webhook.port": { "label": "Webhook Port" },
-    "webhook.path": { "label": "Webhook Path" }
+    "webhook.path": { "label": "Webhook Path" },
+    "webhook.secret": { "label": "Webhook Secret", "sensitive": true },
+    "webhook.rateLimit.windowMs": { "label": "Rate Limit Window (ms)" },
+    "webhook.rateLimit.maxRequests": { "label": "Max Requests per Window" }
   }
 }

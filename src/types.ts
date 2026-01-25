@@ -15,6 +15,11 @@ export interface SendblueChannelConfig {
     enabled: boolean;
     port?: number;        // Default: 3141
     path?: string;        // Default: /webhook/sendblue
+    secret?: string;      // Webhook secret for authentication
+    rateLimit?: {
+      windowMs?: number;    // Rate limit window in ms (default: 60000)
+      maxRequests?: number; // Max requests per window (default: 60)
+    };
   };
 }
 

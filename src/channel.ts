@@ -67,6 +67,8 @@ function startWebhook(config: SendblueChannelConfig): void {
   startWebhookServer({
     port,
     path,
+    secret: config.webhook?.secret,
+    rateLimit: config.webhook?.rateLimit,
     onMessage: processMessage,
     logger: {
       info: (msg) => log('info', msg),
