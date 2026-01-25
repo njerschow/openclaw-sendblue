@@ -17,17 +17,16 @@ export default function register(api: any) {
   const keys = Object.keys(api);
   log.info(`[Sendblue Plugin] API has ${keys.length} methods: ${keys.join(', ')}`);
 
-  // Check what an existing channel (telegram) looks like
-  if (api.runtime?.channel?.telegram) {
-    const telegramKeys = Object.keys(api.runtime.channel.telegram);
-    log.info(`[Sendblue Plugin] telegram channel has: ${telegramKeys.join(', ')}`);
+  // Explore ALL of runtime
+  for (const key of Object.keys(api.runtime)) {
+    const val = api.runtime[key];
+    if (typeof val === 'object' && val !== null) {
+      const subKeys = Object.keys(val);
+      log.info(`[Sendblue Plugin] runtime.${key}: ${subKeys.join(', ')}`);
+    } else {
+      log.info(`[Sendblue Plugin] runtime.${key}: ${typeof val}`);
+    }
   }
-
-  // Check what registerChannel returns - maybe it gives us a dispatcher?
-  log.info(`[Sendblue Plugin] registerChannel returns: ${typeof api.registerChannel({plugin: {id:'test'}})}`);
-
-  // Check if there's a sendblue channel after registration
-  // (we'll log this again after registering)
 
   // Check pluginConfig
   if (api.pluginConfig) {
