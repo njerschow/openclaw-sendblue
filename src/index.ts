@@ -17,22 +17,27 @@ export default function register(api: any) {
   const keys = Object.keys(api);
   log.info(`[Sendblue Plugin] API has ${keys.length} methods: ${keys.join(', ')}`);
 
-  // Explore runtime.channel.text - likely for dispatching text messages
-  if (api.runtime?.channel?.text) {
-    const textKeys = Object.keys(api.runtime.channel.text);
-    log.info(`[Sendblue Plugin] channel.text has: ${textKeys.join(', ')}`);
-    for (const key of textKeys) {
-      log.info(`[Sendblue Plugin]   text.${key}: ${typeof api.runtime.channel.text[key]}`);
-    }
+  // Explore runtime.channel.session
+  if (api.runtime?.channel?.session) {
+    const sessionKeys = Object.keys(api.runtime.channel.session);
+    log.info(`[Sendblue Plugin] channel.session has: ${sessionKeys.join(', ')}`);
   }
 
-  // Explore runtime.channel.routing
-  if (api.runtime?.channel?.routing) {
-    const routingKeys = Object.keys(api.runtime.channel.routing);
-    log.info(`[Sendblue Plugin] channel.routing has: ${routingKeys.join(', ')}`);
-    for (const key of routingKeys) {
-      log.info(`[Sendblue Plugin]   routing.${key}: ${typeof api.runtime.channel.routing[key]}`);
-    }
+  // Explore runtime.channel.activity
+  if (api.runtime?.channel?.activity) {
+    const activityKeys = Object.keys(api.runtime.channel.activity);
+    log.info(`[Sendblue Plugin] channel.activity has: ${activityKeys.join(', ')}`);
+  }
+
+  // Explore runtime directly for dispatch/message methods
+  const runtimeKeys = Object.keys(api.runtime);
+  log.info(`[Sendblue Plugin] runtime keys: ${runtimeKeys.join(', ')}`);
+
+  // Check if 'on' is an event emitter - maybe we can emit events
+  if (typeof api.on === 'function') {
+    log.info(`[Sendblue Plugin] api.on exists - checking if emit exists too`);
+    log.info(`[Sendblue Plugin] api.emit: ${typeof api.emit}`);
+    log.info(`[Sendblue Plugin] api.dispatch: ${typeof api.dispatch}`);
   }
 
   // Check pluginConfig
