@@ -13,6 +13,9 @@ import { createSendblueChannel, startSendblueService, stopSendblueService } from
 export default function register(api: any) {
   const log = api.logger || console;
 
+  // Debug: log available API methods
+  log.info('[Sendblue Plugin] Available API methods: ' + Object.keys(api).join(', '));
+
   log.info('[Sendblue Plugin] Registering channel...');
 
   const channel = createSendblueChannel(api);
