@@ -161,17 +161,62 @@ async function processMessage(msg: SendblueMessage): Promise<void> {
   // Store in conversation history
   addConversationMessage(msg.from_number, msg.from_number, messageContent, false);
 
-  // Emit to clawdbot channel system
-  if (clawdbotApi?.emitInbound) {
-    clawdbotApi.emitInbound({
-      channelId: 'sendblue',
-      chatId: msg.from_number,
-      from: msg.from_number,
-      text: messageContent,
-      timestamp: new Date(msg.date_sent).getTime(),
-      messageId: msg.message_handle,
-      raw: msg,
+  // Dispatch to clawdbot using the runtime channel reply dispatcher
+  const runtime = clawdbotApi?.runtime;
+  if (!runtime?.channel?.reply?.dispatchReplyWithBufferedBlockDispatcher) {
+    log('error', 'dispatchReplyWithBufferedBlockDispatcher not available');
+    return;
+  }
+
+  const shortId = msg.message_handle.slice(-8);
+  const timestamp = new Date(msg.date_sent).getTime();
+
+  const ctxPayload = {
+    Body: messageContent,
+    BodyForAgent: messageContent,
+    RawBody: msg.content || '',
+    From: `sendblue:${msg.from_number}`,
+    To: `sendblue:${channelConfig?.phoneNumber}`,
+    SessionKey: `sendblue:${msg.from_number}`,
+    AccountId: 'default',
+    ChatType: 'direct',
+    SenderId: msg.from_number,
+    SenderName: msg.from_number,
+    MessageSid: shortId,
+    MessageSidFull: msg.message_handle,
+    Timestamp: timestamp,
+    Provider: 'sendblue',
+    Surface: 'sms',
+    OriginatingChannel: 'sendblue',
+    MediaUrl: mediaUrl || undefined,
+  };
+
+  try {
+    await runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+      ctx: ctxPayload,
+      cfg: clawdbotApi.config,
+      dispatcherOptions: {
+        deliver: async (payload: { text?: string; media?: string }) => {
+          if (payload.text) {
+            await sendblueClient?.sendMessage(msg.from_number, payload.text);
+            addConversationMessage(msg.from_number, channelConfig!.phoneNumber, payload.text, true);
+            log('info', `Reply sent to ${msg.from_number.slice(-4)}`);
+          }
+        },
+        onReplyStart: async () => {
+          log('info', 'Agent starting reply...');
+        },
+        onIdle: async () => {
+          log('info', 'Agent idle');
+        },
+        onError: (err: Error) => {
+          log('error', `Dispatch error: ${err.message}`);
+        },
+      },
     });
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    log('error', `Failed to dispatch message: ${errorMsg}`);
   }
 }
 
