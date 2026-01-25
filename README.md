@@ -2,23 +2,24 @@
 
 Text your [clawdbot](https://clawd.bot) via iMessage or SMS.
 
-This plugin connects clawdbot to [Sendblue](https://sendblue.com/api), letting you chat with your AI assistant by texting a phone number.
+This plugin connects clawdbot to [Sendblue](https://sendblue.co), letting you chat with your AI assistant by texting a phone number.
+
+**By default, only phone numbers you explicitly allow can text the bot.** Random people texting your Sendblue number will be ignored.
 
 ## Prerequisites
 
 - [clawdbot](https://clawd.bot) installed and running
 - [Node.js](https://nodejs.org) 18+
-- A Sendblue account (free tier available)
+- A Sendblue account with API access
 
 ## Setup
 
 ### Step 1: Get Sendblue Credentials
 
-1. Sign up at [sendblue.com/api](https://sendblue.com/api)
-2. Go to **Dashboard → API Keys**
-3. Copy your **API Key** (starts with `sb-api-key-`)
-4. Copy your **API Secret** (starts with `sb-secret-`)
-5. Note your **phone number** (shown in dashboard, format: `+15551234567`)
+1. Sign up at [sendblue.co](https://sendblue.co) and subscribe to get API access
+2. Go to **Dashboard** and find your API credentials
+3. Copy your **API Key** and **API Secret**
+4. Note your **Sendblue phone number** (the number Sendblue assigned to you)
 
 ### Step 2: Install the Plugin
 
@@ -40,8 +41,8 @@ Edit `~/.clawdbot/clawdbot.json` and add the plugin config:
       "sendblue": {
         "enabled": true,
         "config": {
-          "apiKey": "sb-api-key-xxxxx",
-          "apiSecret": "sb-secret-xxxxx",
+          "apiKey": "YOUR_SENDBLUE_API_KEY",
+          "apiSecret": "YOUR_SENDBLUE_API_SECRET",
           "phoneNumber": "+15551234567",
           "allowFrom": ["+15559876543"]
         }
@@ -52,12 +53,14 @@ Edit `~/.clawdbot/clawdbot.json` and add the plugin config:
 ```
 
 Replace:
-- `apiKey` → your Sendblue API key
-- `apiSecret` → your Sendblue API secret
-- `phoneNumber` → your Sendblue phone number
-- `allowFrom` → your personal phone number(s) that can text the bot
+- `apiKey` - your Sendblue API key
+- `apiSecret` - your Sendblue API secret
+- `phoneNumber` - the Sendblue phone number (the one Sendblue gave you)
+- `allowFrom` - **your personal phone number** (the phone you'll text from)
 
-> **Note:** If you already have a `clawdbot.json`, merge this into your existing `plugins.entries` section.
+All phone numbers must be in E.164 format: `+1` followed by 10 digits (e.g., `+15551234567`).
+
+> **Already have a `clawdbot.json`?** Just add the `sendblue` section inside your existing `plugins.entries` object.
 
 ### Step 4: Restart the Gateway
 
@@ -67,7 +70,9 @@ clawdbot gateway restart
 
 ### Step 5: Test It
 
-Text your Sendblue number from your phone. You should get a response from clawdbot!
+Open your phone's messaging app and text your Sendblue number. You should get a response from clawdbot!
+
+If you don't get a response, make sure you're texting **from** the number you put in `allowFrom`.
 
 ## Configuration Options
 
@@ -75,46 +80,41 @@ Text your Sendblue number from your phone. You should get a response from clawdb
 |--------|----------|-------------|
 | `apiKey` | Yes | Your Sendblue API key |
 | `apiSecret` | Yes | Your Sendblue API secret |
-| `phoneNumber` | Yes | Your Sendblue phone number |
-| `allowFrom` | No | Phone numbers allowed to text the bot |
+| `phoneNumber` | Yes | The Sendblue phone number (the bot's number) |
+| `allowFrom` | Recommended | Your phone number(s) that can text the bot |
 | `dmPolicy` | No | `"allowlist"` (default), `"open"`, or `"disabled"` |
-| `pollIntervalMs` | No | Poll interval in ms (default: 5000) |
+| `pollIntervalMs` | No | How often to check for new messages in ms (default: 5000) |
 
-### Who Can Text the Bot?
+### Access Control
 
-By default, only numbers in `allowFrom` can text the bot. To let anyone text:
+By default (`dmPolicy: "allowlist"`), only numbers listed in `allowFrom` can text the bot. Messages from other numbers are silently ignored.
+
+To allow **anyone** to text the bot:
 
 ```json
-{
-  "plugins": {
-    "entries": {
-      "sendblue": {
-        "enabled": true,
-        "config": {
-          "apiKey": "...",
-          "apiSecret": "...",
-          "phoneNumber": "...",
-          "dmPolicy": "open"
-        }
-      }
-    }
-  }
+"config": {
+  "apiKey": "...",
+  "apiSecret": "...",
+  "phoneNumber": "...",
+  "dmPolicy": "open"
 }
 ```
 
+To **disable** the channel entirely, set `dmPolicy: "disabled"`.
+
 ## Troubleshooting
+
+**Not receiving messages**
+- Make sure you're texting from a number in `allowFrom`
+- Check that your Sendblue credentials are correct
+- Check logs: `clawdbot logs`
 
 **"Unknown channel id" error**
 - Make sure you ran `npm run build` after cloning
 - Check that the plugin is in `~/.clawdbot/extensions/sendblue`
 
-**Not receiving messages**
-- Verify your phone number is in `allowFrom` (or set `dmPolicy` to `"open"`)
-- Check that your Sendblue credentials are correct
-- Check logs: `clawdbot logs`
-
 **Messages not sending**
-- Verify your Sendblue account is active
+- Verify your Sendblue account is active and has API access
 - Check your API credentials
 
 ## How It Works
@@ -131,6 +131,8 @@ clawdbot + this plugin
     ▼ AI response
 Sendblue → Your Phone
 ```
+
+The plugin polls Sendblue for new messages every 5 seconds (configurable). When you text the Sendblue number, the plugin picks it up, sends it to clawdbot for processing, and sends the AI's response back via Sendblue.
 
 ## License
 
