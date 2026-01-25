@@ -1,16 +1,15 @@
 /**
- * Webhook server for receiving Sendblue messages in real-time
+ * Webhook handler for receiving Sendblue messages in real-time
+ * 
+ * Integrates with Clawdbot's gateway HTTP server instead of running standalone.
  */
 
-import http from 'http';
+import type { IncomingMessage, ServerResponse } from 'http';
 import type { SendblueMessage } from './types.js';
 
-// Maximum request body size (1MB)
-const MAX_BODY_SIZE = 1024 * 1024;
-
-export interface WebhookServerConfig {
-  port: number;
+export interface WebhookHandlerConfig {
   path: string;
+  secret?: string;
   onMessage: (message: SendblueMessage) => Promise<void>;
   logger?: {
     info: (msg: string) => void;
@@ -18,7 +17,19 @@ export interface WebhookServerConfig {
   };
 }
 
-let server: http.Server | null = null;
+let webhookConfig: WebhookHandlerConfig | null = null;
+
+/**
+ * Normalize webhook path for consistent matching
+ */
+function normalizePath(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '/webhook/sendblue';
+  const withSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  return withSlash.endsWith('/') && withSlash.length > 1 
+    ? withSlash.slice(0, -1) 
+    : withSlash;
+}
 
 /**
  * Validate that the payload has required SendblueMessage fields
@@ -37,126 +48,134 @@ function isValidSendbluePayload(payload: unknown): payload is SendblueMessage {
 }
 
 /**
- * Start the webhook server
+ * Parse JSON body from request
  */
-export function startWebhookServer(config: WebhookServerConfig): void {
-  const { port, path, onMessage, logger } = config;
-  const log = logger || { info: console.log, error: console.error };
-
-  if (server) {
-    log.info('[Webhook] Server already running');
-    return;
-  }
-
-  server = http.createServer((req, res) => {
-    // Health check endpoint
-    if (req.method === 'GET' && req.url === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok' }));
-      return;
-    }
-
-    // Only handle POST requests to the webhook path
-    if (req.method !== 'POST' || !req.url?.startsWith(path)) {
-      res.writeHead(404);
-      res.end();
-      return;
-    }
-
-    // Collect request body with size limit
-    let body = '';
-    let bodyTooLarge = false;
+async function parseBody(req: IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const maxSize = 1024 * 1024; // 1MB limit
 
     req.on('data', (chunk: Buffer) => {
-      if (bodyTooLarge) return;
-
-      body += chunk.toString();
-      if (body.length > MAX_BODY_SIZE) {
-        bodyTooLarge = true;
-        res.writeHead(413, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Payload too large' }));
+      size += chunk.length;
+      if (size > maxSize) {
+        reject(new Error('Payload too large'));
         req.destroy();
+        return;
       }
+      chunks.push(chunk);
     });
 
-    req.on('error', (err) => {
-      log.error(`[Webhook] Request error: ${err.message}`);
-      if (!res.headersSent) {
-        res.writeHead(500);
-        res.end();
-      }
-    });
-
-    req.on('end', async () => {
-      if (bodyTooLarge || res.headersSent) return;
-
-      // Parse and validate JSON before responding
-      let payload: unknown;
+    req.on('end', () => {
       try {
-        payload = JSON.parse(body);
+        const body = Buffer.concat(chunks).toString('utf-8');
+        resolve(JSON.parse(body));
       } catch {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Invalid JSON' }));
-        return;
-      }
-
-      // Validate required fields
-      if (!isValidSendbluePayload(payload)) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Invalid payload: missing required fields' }));
-        return;
-      }
-
-      // Respond 200 OK - payload is valid, we'll process it
-      // This prevents Sendblue from retrying
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ received: true }));
-
-      // Only process inbound messages
-      if (payload.is_outbound) {
-        return;
-      }
-
-      try {
-        log.info(`[Webhook] Received message from ${payload.from_number.slice(-4)}`);
-        await onMessage(payload);
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        log.error(`[Webhook] Error processing message: ${errorMsg}`);
+        reject(new Error('Invalid JSON'));
       }
     });
-  });
 
-  server.listen(port, () => {
-    log.info(`[Webhook] Server listening on port ${port}`);
-    log.info(`[Webhook] Endpoint: http://localhost:${port}${path}`);
-  });
-
-  server.on('error', (error) => {
-    log.error(`[Webhook] Server error: ${error.message}`);
+    req.on('error', reject);
   });
 }
 
 /**
- * Stop the webhook server
+ * HTTP request handler for Clawdbot's gateway
+ * Returns true if request was handled, false to pass to next handler
  */
-export function stopWebhookServer(): Promise<void> {
-  return new Promise((resolve) => {
-    if (!server) {
-      resolve();
-      return;
+export async function handleWebhookRequest(
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<boolean> {
+  if (!webhookConfig) {
+    return false; // Webhook not configured
+  }
+
+  const url = new URL(req.url || '/', 'http://localhost');
+  const path = normalizePath(url.pathname);
+  const expectedPath = normalizePath(webhookConfig.path);
+
+  // Check if this request is for us
+  if (path !== expectedPath) {
+    return false; // Not our endpoint
+  }
+
+  const log = webhookConfig.logger || { info: console.log, error: console.error };
+
+  // Only handle POST
+  if (req.method !== 'POST') {
+    res.writeHead(405, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Method not allowed' }));
+    return true;
+  }
+
+  // Verify webhook secret if configured
+  if (webhookConfig.secret) {
+    const providedSecret = req.headers['x-sendblue-secret'] as string | undefined;
+    if (providedSecret !== webhookConfig.secret) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid webhook secret' }));
+      return true;
     }
+  }
 
-    server.close(() => {
-      server = null;
-      resolve();
-    });
-  });
+  // Parse and validate payload
+  let payload: unknown;
+  try {
+    payload = await parseBody(req);
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : 'Invalid request';
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: errorMsg }));
+    return true;
+  }
+
+  if (!isValidSendbluePayload(payload)) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid payload: missing required fields' }));
+    return true;
+  }
+
+  // Respond 200 OK immediately to prevent Sendblue retries
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ received: true }));
+
+  // Skip outbound messages (our own sends)
+  if (payload.is_outbound) {
+    return true;
+  }
+
+  // Process the message asynchronously
+  try {
+    log.info(`[Webhook] Received message from ${payload.from_number.slice(-4)}`);
+    await webhookConfig.onMessage(payload);
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    log.error(`[Webhook] Error processing message: ${errorMsg}`);
+  }
+
+  return true;
 }
 
 /**
- * Check if webhook server is running
+ * Initialize webhook handler configuration
  */
-export function isWebhookServerRunning(): boolean {
-  return server !== null;
+export function initWebhookHandler(config: WebhookHandlerConfig): void {
+  webhookConfig = config;
+  const log = config.logger || { info: console.log, error: console.error };
+  log.info(`[Webhook] Handler registered for path: ${normalizePath(config.path)}`);
+}
+
+/**
+ * Clear webhook handler configuration
+ */
+export function clearWebhookHandler(): void {
+  webhookConfig = null;
+}
+
+/**
+ * Check if webhook handler is configured
+ */
+export function isWebhookConfigured(): boolean {
+  return webhookConfig !== null;
 }

@@ -10,7 +10,7 @@ import {
   addConversationMessage,
   cleanupOldProcessedMessages,
 } from './db.js';
-import { startWebhookServer, stopWebhookServer } from './webhook.js';
+import { handleWebhookRequest, initWebhookHandler, clearWebhookHandler } from './webhook.js';
 import type { SendblueChannelConfig, SendblueMessage } from './types.js';
 
 // State
@@ -35,7 +35,7 @@ function log(level: 'info' | 'warn' | 'error', message: string): void {
 }
 
 /**
- * Initialize the Sendblue service (shared setup for both polling and webhook modes)
+ * Initialize the Sendblue service
  */
 function initializeService(api: any, config: SendblueChannelConfig): void {
   clawdbotApi = api;
@@ -56,17 +56,15 @@ function initializeService(api: any, config: SendblueChannelConfig): void {
 }
 
 /**
- * Start webhook server for real-time message delivery
+ * Start webhook mode (real-time message delivery via Clawdbot gateway)
  */
-function startWebhook(config: SendblueChannelConfig): void {
-  const port = config.webhook?.port || 3141;
-  const path = config.webhook?.path || '/webhook/sendblue';
+function startWebhook(api: any, config: SendblueChannelConfig): void {
+  const path = config.webhookPath || '/webhook/sendblue';
 
-  log('info', `Starting webhook server on port ${port}`);
-
-  startWebhookServer({
-    port,
+  // Initialize the webhook handler
+  initWebhookHandler({
     path,
+    secret: config.webhookSecret,
     onMessage: processMessage,
     logger: {
       info: (msg) => log('info', msg),
@@ -74,11 +72,20 @@ function startWebhook(config: SendblueChannelConfig): void {
     },
   });
 
+  // Register HTTP handler with Clawdbot's gateway
+  if (api.registerHttpHandler) {
+    api.registerHttpHandler(handleWebhookRequest);
+    log('info', `Webhook registered at ${path}`);
+    log('info', 'Configure Sendblue to send webhooks to: https://<your-domain>' + path);
+  } else {
+    log('warn', 'registerHttpHandler not available - webhook may not work');
+  }
+
   webhookEnabled = true;
 }
 
 /**
- * Start polling for inbound messages
+ * Start polling for inbound messages (fallback mode)
  */
 function startPolling(): void {
   if (pollInterval) {
@@ -114,9 +121,9 @@ async function stopAllServices(): Promise<void> {
   stopPolling();
 
   if (webhookEnabled) {
-    log('info', 'Stopping webhook server...');
-    await stopWebhookServer();
+    clearWebhookHandler();
     webhookEnabled = false;
+    log('info', 'Webhook handler cleared');
   }
 
   if (cleanupInterval) {
@@ -131,12 +138,14 @@ async function stopAllServices(): Promise<void> {
 export function startSendblueService(api: any, config: SendblueChannelConfig): void {
   initializeService(api, config);
 
-  if (config.webhook?.enabled) {
-    startWebhook(config);
+  // Prefer webhook mode if webhookPath is configured
+  // Webhook integrates with Clawdbot's gateway (no separate port needed)
+  if (config.webhookPath) {
+    startWebhook(api, config);
     log('info', 'Using webhook mode for real-time messages');
   } else {
     startPolling();
-    log('info', 'Using polling mode for messages');
+    log('info', 'Using polling mode (set webhookPath for real-time delivery)');
   }
 }
 
@@ -224,12 +233,8 @@ async function processMessage(msg: SendblueMessage): Promise<void> {
 
   log('info', `Inbound from ${fromNumberDisplay}: "${messageContent.substring(0, 50)}..."`);
 
-  // Mark message as read
-  try {
-    await sendblueClient?.markRead(msg.from_number);
-  } catch (e) {
-    // Non-critical, continue processing
-  }
+  // Mark message as read (best effort)
+  sendblueClient?.markRead(msg.from_number).catch(() => {});
 
   // Store in conversation history
   addConversationMessage(msg.from_number, msg.from_number, messageContent, false);
@@ -269,23 +274,21 @@ async function processMessage(msg: SendblueMessage): Promise<void> {
       ctx: ctxPayload,
       cfg: clawdbotApi.config,
       dispatcherOptions: {
+        onReplyStart: async () => {
+          // Send typing indicator when agent starts replying
+          try {
+            await sendblueClient?.sendTypingIndicator(msg.from_number);
+            log('info', `Typing indicator sent to ${fromNumberDisplay}`);
+          } catch (e) {
+            // Non-critical, continue
+          }
+        },
         deliver: async (payload: { text?: string; media?: string }) => {
           if (payload.text) {
             await sendblueClient?.sendMessage(msg.from_number, payload.text);
             addConversationMessage(msg.from_number, channelConfig!.phoneNumber, payload.text, true);
             log('info', `Reply sent to ${fromNumberDisplay}`);
           }
-        },
-        onReplyStart: async () => {
-          log('info', 'Agent starting reply...');
-          try {
-            await sendblueClient?.sendTypingIndicator(msg.from_number);
-          } catch (e) {
-            // Non-critical, continue
-          }
-        },
-        onIdle: async () => {
-          log('info', 'Agent idle');
         },
         onError: (err: Error) => {
           log('error', `Dispatch error: ${err.message}`);

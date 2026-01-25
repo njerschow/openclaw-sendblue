@@ -6,8 +6,8 @@ Text your [clawdbot](https://clawd.bot) via iMessage or SMS.
 
 ### 1. Create a Sendblue Account
 
-1. Go to [sendblue.com/api](https://sendblue.com/api) and click **"Try for free"**
-2. After signing up, find these three things in your dashboard:
+1. Go to [sendblue.co](https://sendblue.co) and sign up
+2. Find these in your dashboard:
    - **API Key**
    - **API Secret**
    - **Your Sendblue phone number** (e.g., `+15551234567`)
@@ -31,10 +31,11 @@ Add this to `~/.clawdbot/clawdbot.json`:
       "sendblue": {
         "enabled": true,
         "config": {
-          "apiKey": "paste-your-api-key",
-          "apiSecret": "paste-your-api-secret",
+          "apiKey": "your-api-key",
+          "apiSecret": "your-api-secret",
           "phoneNumber": "+15551234567",
-          "allowFrom": ["+15559876543"]
+          "allowFrom": ["+15559876543"],
+          "webhookPath": "/webhook/sendblue"
         }
       }
     }
@@ -50,73 +51,87 @@ Add this to `~/.clawdbot/clawdbot.json`:
 | `phoneNumber` | The Sendblue number (from your dashboard) |
 | `allowFrom` | **Your phone number** (the one you'll text from) |
 
-Phone numbers must start with `+1` (e.g., `+15551234567`).
+### 4. Set Up Webhooks (Recommended)
 
-### 4. Restart & Test
+For **instant message delivery**, configure Sendblue to send webhooks:
+
+1. In your Sendblue dashboard, set the webhook URL to:
+   ```
+   https://your-clawdbot-domain:18789/webhook/sendblue
+   ```
+2. The plugin will receive messages in real-time (no polling delay)
+
+> **Note:** Requires your Clawdbot gateway to be publicly accessible. Use ngrok, Cloudflare Tunnel, or Tailscale if running locally.
+
+If you can't use webhooks, remove `webhookPath` and the plugin will fall back to polling every 5 seconds.
+
+### 5. Restart & Test
 
 ```bash
 clawdbot gateway restart
 ```
 
-Now text the Sendblue number from your phone. You should get a reply from clawdbot!
+Text the Sendblue number from your phone. You should get a reply from clawdbot!
+
+---
+
+## Features
+
+- ✅ **Instant delivery** via webhooks (or polling fallback)
+- ✅ **Typing indicators** - shows "typing..." bubble when agent is replying
+- ✅ **Read receipts** - marks messages as read
+- ✅ **Media support** - send and receive images
+- ✅ **Allowlist** - control who can message the bot
+
+---
+
+## Configuration Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `apiKey` | Sendblue API key | (required) |
+| `apiSecret` | Sendblue API secret | (required) |
+| `phoneNumber` | Sendblue phone number | (required) |
+| `allowFrom` | Phone numbers that can text the bot | `[]` |
+| `dmPolicy` | `"allowlist"`, `"open"`, or `"disabled"` | `"allowlist"` |
+| `webhookPath` | Webhook endpoint path (enables webhook mode) | (none = polling) |
+| `webhookSecret` | Secret to verify webhook requests | (none) |
+| `pollIntervalMs` | Polling interval in ms (if not using webhooks) | `5000` |
+
+### DM Policies
+
+- `"allowlist"` (default) - Only numbers in `allowFrom` can message
+- `"open"` - Anyone can message the bot
+- `"disabled"` - Bot won't respond to DMs
+
+---
+
+## Webhook vs Polling
+
+| Mode | Latency | Setup |
+|------|---------|-------|
+| **Webhook** | Instant | Requires public URL |
+| **Polling** | Up to 5s delay | Works anywhere |
+
+The plugin automatically uses webhook mode when `webhookPath` is configured, otherwise falls back to polling.
 
 ---
 
 ## Troubleshooting
 
 **No response?**
-- Make sure you're texting **from** the number in `allowFrom`
+- Make sure you're texting **from** a number in `allowFrom`
 - Check logs: `clawdbot logs`
-- Verify your API credentials are correct
+- Verify API credentials are correct
+
+**Webhook not receiving?**
+- Ensure your gateway is publicly accessible
+- Check the webhook URL in Sendblue dashboard matches your config
+- Look for connection errors in `clawdbot logs`
 
 **"Unknown channel id" error?**
 - Run `npm run build` in the plugin folder
-
----
-
-## Advanced Options
-
-### Let Anyone Text the Bot
-
-By default, only numbers in `allowFrom` can text the bot. To allow anyone:
-
-```json
-"config": {
-  ...
-  "dmPolicy": "open"
-}
-```
-
-### Webhook Mode (Faster)
-
-By default, the plugin checks for messages every 5 seconds. For instant delivery, enable webhooks:
-
-```json
-"config": {
-  ...
-  "webhook": {
-    "enabled": true,
-    "port": 3141
-  }
-}
-```
-
-Then configure Sendblue to send webhooks to `https://your-server:3141/webhook/sendblue`.
-
-> Requires a publicly accessible server (use ngrok/Cloudflare Tunnel if running locally).
-
-### All Options
-
-| Option | Description |
-|--------|-------------|
-| `apiKey` | Sendblue API key (required) |
-| `apiSecret` | Sendblue API secret (required) |
-| `phoneNumber` | Sendblue phone number (required) |
-| `allowFrom` | Phone numbers that can text the bot |
-| `dmPolicy` | `"allowlist"` (default), `"open"`, or `"disabled"` |
-| `pollIntervalMs` | Poll interval in ms (default: 5000) |
-| `webhook.enabled` | Enable webhook server (default: false) |
-| `webhook.port` | Webhook port (default: 3141) |
+- Restart the gateway: `clawdbot gateway restart`
 
 ---
 
