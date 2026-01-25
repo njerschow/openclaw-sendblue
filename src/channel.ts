@@ -78,6 +78,17 @@ function stopPolling(): void {
 }
 
 /**
+ * Export for service registration
+ */
+export function startSendblueService(api: any, config: SendblueChannelConfig): void {
+  startPolling(api, config);
+}
+
+export function stopSendblueService(): void {
+  stopPolling();
+}
+
+/**
  * Check if a phone number is allowed
  */
 function isAllowed(phoneNumber: string): boolean {
