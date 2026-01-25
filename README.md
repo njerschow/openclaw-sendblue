@@ -59,13 +59,10 @@ Replace:
 
 > **Note:** If you already have a `clawdbot.json`, merge this into your existing `plugins.entries` section.
 
-### Step 4: Restart Clawdbot
+### Step 4: Restart the Gateway
 
 ```bash
-# If running as a service
-clawdbot restart
-
-# Or just restart the process manually
+clawdbot gateway restart
 ```
 
 ### Step 5: Test It
@@ -114,7 +111,7 @@ By default, only numbers in `allowFrom` can text the bot. To let anyone text:
 **Not receiving messages**
 - Verify your phone number is in `allowFrom` (or set `dmPolicy` to `"open"`)
 - Check that your Sendblue credentials are correct
-- Look at clawdbot logs for errors
+- Check logs: `clawdbot logs`
 
 **Messages not sending**
 - Verify your Sendblue account is active
