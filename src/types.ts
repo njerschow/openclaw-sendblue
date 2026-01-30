@@ -1,8 +1,8 @@
 /**
- * Type definitions for clawdbot-sendblue plugin
+ * Type definitions for openclaw-sendblue plugin
  */
 
-// Channel configuration from clawdbot.json channels.sendblue
+// Channel configuration from openclaw.json channels.sendblue
 export interface SendblueChannelConfig {
   apiKey: string;
   apiSecret: string;

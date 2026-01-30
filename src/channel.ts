@@ -1,6 +1,6 @@
 /**
- * Sendblue Channel Plugin for Clawdbot
- * Implements the clawdbot channel interface for Sendblue iMessage/SMS
+ * Sendblue Channel Plugin for Openclaw
+ * Implements the openclaw channel interface for Sendblue iMessage/SMS
  */
 
 import { SendblueClient } from './sendblue.js';
@@ -20,14 +20,14 @@ let lastPollTime: Date = new Date(Date.now() - 60 * 1000);
 let isPolling = false;
 let sendblueClient: SendblueClient | null = null;
 let channelConfig: SendblueChannelConfig | null = null;
-let clawdbotApi: any = null;
+let openclawApi: any = null;
 let webhookEnabled = false;
 
 // Logger helper - uses api.logger if available, falls back to console
 function log(level: 'info' | 'warn' | 'error', message: string): void {
   const prefix = '[Sendblue]';
-  if (clawdbotApi?.logger) {
-    clawdbotApi.logger[level](`${prefix} ${message}`);
+  if (openclawApi?.logger) {
+    openclawApi.logger[level](`${prefix} ${message}`);
   } else {
     const fn = level === 'error' ? console.error : console.log;
     fn(`${prefix} ${message}`);
@@ -38,7 +38,7 @@ function log(level: 'info' | 'warn' | 'error', message: string): void {
  * Initialize the Sendblue service (shared setup for both polling and webhook modes)
  */
 function initializeService(api: any, config: SendblueChannelConfig): void {
-  clawdbotApi = api;
+  openclawApi = api;
   channelConfig = config;
   sendblueClient = new SendblueClient({
     apiKey: config.apiKey,
@@ -236,8 +236,8 @@ async function processMessage(msg: SendblueMessage): Promise<void> {
   // Store in conversation history
   addConversationMessage(msg.from_number, msg.from_number, messageContent, false);
 
-  // Dispatch to clawdbot using the runtime channel reply dispatcher
-  const runtime = clawdbotApi?.runtime;
+  // Dispatch to openclaw using the runtime channel reply dispatcher
+  const runtime = openclawApi?.runtime;
   if (!runtime?.channel?.reply?.dispatchReplyWithBufferedBlockDispatcher) {
     log('error', 'dispatchReplyWithBufferedBlockDispatcher not available');
     return;
@@ -269,7 +269,7 @@ async function processMessage(msg: SendblueMessage): Promise<void> {
   try {
     await runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
       ctx: ctxPayload,
-      cfg: clawdbotApi.config,
+      cfg: openclawApi.config,
       dispatcherOptions: {
         deliver: async (payload: { text?: string; media?: string }) => {
           if (payload.text) {
@@ -305,7 +305,7 @@ async function processMessage(msg: SendblueMessage): Promise<void> {
  */
 export function createSendblueChannel(api: any) {
   // Store api reference early for logging
-  clawdbotApi = api;
+  openclawApi = api;
 
   return {
     // Identity & Metadata

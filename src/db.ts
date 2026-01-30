@@ -1,6 +1,6 @@
 /**
  * SQLite database for message deduplication and conversation tracking
- * Simplified version for clawdbot adapter
+ * Simplified version for openclaw adapter
  */
 
 import Database from 'better-sqlite3';
@@ -9,7 +9,7 @@ import fs from 'fs';
 import os from 'os';
 import type { ConversationMessage, ChatInfo } from './types.js';
 
-const DB_DIR = path.join(os.homedir(), '.config', 'clawdbot-sendblue');
+const DB_DIR = path.join(os.homedir(), '.config', 'openclaw-sendblue');
 const DB_PATH = path.join(DB_DIR, 'adapter.db');
 
 let db: Database.Database | null = null;

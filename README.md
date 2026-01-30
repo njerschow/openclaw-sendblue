@@ -1,6 +1,6 @@
-# clawdbot-sendblue
+# openclaw-sendblue
 
-Text your [clawdbot](https://clawd.bot) via iMessage or SMS.
+Text your [openclaw](https://openclaw.ai) via iMessage or SMS.
 
 ## Quick Start
 
@@ -16,14 +16,14 @@ Text your [clawdbot](https://clawd.bot) via iMessage or SMS.
 ### 2. Install the Plugin
 
 ```bash
-git clone https://github.com/njerschow/clawdbot-sendblue ~/.clawdbot/extensions/sendblue
-cd ~/.clawdbot/extensions/sendblue
+git clone https://github.com/njerschow/openclaw-sendblue ~/.openclaw/extensions/sendblue
+cd ~/.openclaw/extensions/sendblue
 npm install && npm run build
 ```
 
 ### 3. Configure
 
-Add this to `~/.clawdbot/clawdbot.json`:
+Add this to `~/.openclaw/openclaw.json`:
 
 ```json
 {
@@ -56,10 +56,10 @@ Phone numbers must start with `+1` (e.g., `+15551234567`).
 ### 4. Restart & Test
 
 ```bash
-clawdbot gateway restart
+openclaw gateway restart
 ```
 
-Now text the Sendblue number from your phone. You should get a reply from clawdbot!
+Now text the Sendblue number from your phone. You should get a reply from openclaw!
 
 ---
 
@@ -67,7 +67,7 @@ Now text the Sendblue number from your phone. You should get a reply from clawdb
 
 **No response?**
 - Make sure you're texting **from** the number in `allowFrom`
-- Check logs: `clawdbot logs`
+- Check logs: `openclaw logs`
 - Verify your API credentials are correct
 
 **"Unknown channel id" error?**

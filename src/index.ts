@@ -1,5 +1,5 @@
 /**
- * Clawdbot Sendblue Plugin
+ * Openclaw Sendblue Plugin
  *
  * Registers a Sendblue messaging channel for iMessage/SMS support.
  */
@@ -8,7 +8,7 @@ import { createSendblueChannel, startSendblueService, stopSendblueService } from
 
 /**
  * Plugin entry point
- * Called by clawdbot to register the plugin
+ * Called by openclaw to register the plugin
  */
 export default function register(api: any) {
   const log = api.logger || console;
