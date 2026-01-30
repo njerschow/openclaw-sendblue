@@ -9,6 +9,8 @@ import {
   tryMarkMessageProcessed,
   addConversationMessage,
   cleanupOldProcessedMessages,
+  upsertOutboundMessageStatus,
+  listPendingOutboundStatuses,
 } from './db.js';
 import { startWebhookServer, stopWebhookServer } from './webhook.js';
 import type { SendblueChannelConfig, SendblueMessage } from './types.js';
@@ -16,8 +18,10 @@ import type { SendblueChannelConfig, SendblueMessage } from './types.js';
 // State
 let pollInterval: NodeJS.Timeout | null = null;
 let cleanupInterval: NodeJS.Timeout | null = null;
+let statusInterval: NodeJS.Timeout | null = null;
 let lastPollTime: Date = new Date(Date.now() - 60 * 1000);
 let isPolling = false;
+let isReconcilingStatus = false;
 let sendblueClient: SendblueClient | null = null;
 let channelConfig: SendblueChannelConfig | null = null;
 let clawdbotApi: any = null;
@@ -53,6 +57,10 @@ function initializeService(api: any, config: SendblueChannelConfig): void {
 
   // Cleanup old messages periodically
   cleanupInterval = setInterval(() => cleanupOldProcessedMessages(), 60 * 60 * 1000);
+
+  // Reconcile outbound delivery status periodically
+  // (Keep this fairly low-frequency to avoid rate limits)
+  statusInterval = setInterval(() => reconcileOutboundStatuses(), 20 * 1000);
 }
 
 /**
@@ -124,6 +132,11 @@ async function stopAllServices(): Promise<void> {
   if (cleanupInterval) {
     clearInterval(cleanupInterval);
     cleanupInterval = null;
+  }
+
+  if (statusInterval) {
+    clearInterval(statusInterval);
+    statusInterval = null;
   }
 }
 
@@ -272,9 +285,49 @@ async function processMessage(msg: SendblueMessage): Promise<void> {
       cfg: clawdbotApi.config,
       dispatcherOptions: {
         deliver: async (payload: { text?: string; media?: string }) => {
-          if (payload.text) {
-            await sendblueClient?.sendMessage(msg.from_number, payload.text);
-            addConversationMessage(msg.from_number, channelConfig!.phoneNumber, payload.text, true);
+          const text = payload.text ?? '';
+          const media = payload.media;
+
+          // If the agent produced media, upload+send it.
+          if (media) {
+            const result = await sendblueClient?.sendMessageWithAttachment(msg.from_number, text, {
+              url: media,
+            });
+
+            if (result?.messageId) {
+              upsertOutboundMessageStatus({
+                messageHandle: result.messageId,
+                chatId: msg.from_number,
+                status: 'sent',
+                isTerminal: false,
+              });
+            }
+
+            addConversationMessage(
+              msg.from_number,
+              channelConfig!.phoneNumber,
+              text ? `${text}\n\n[Media: ${media}]` : `[Media: ${media}]`,
+              true
+            );
+
+            log('info', `Reply (media) sent to ${fromNumberDisplay}`);
+            return;
+          }
+
+          // Otherwise send plain text.
+          if (text) {
+            const result = await sendblueClient?.sendMessage(msg.from_number, text);
+
+            if (result?.messageId) {
+              upsertOutboundMessageStatus({
+                messageHandle: result.messageId,
+                chatId: msg.from_number,
+                status: 'sent',
+                isTerminal: false,
+              });
+            }
+
+            addConversationMessage(msg.from_number, channelConfig!.phoneNumber, text, true);
             log('info', `Reply sent to ${fromNumberDisplay}`);
           }
         },
@@ -303,6 +356,61 @@ async function processMessage(msg: SendblueMessage): Promise<void> {
 /**
  * Create the Sendblue channel plugin
  */
+function isTerminalSendblueStatus(status: string): boolean {
+  const s = (status || '').toLowerCase();
+  // We don't have official enumerations here; treat common terminal states as terminal.
+  return (
+    s === 'delivered' ||
+    s === 'read' ||
+    s === 'failed' ||
+    s === 'undelivered' ||
+    s === 'canceled' ||
+    s === 'cancelled'
+  );
+}
+
+async function reconcileOutboundStatuses(): Promise<void> {
+  if (isReconcilingStatus || !sendblueClient) return;
+
+  try {
+    isReconcilingStatus = true;
+
+    const pending = listPendingOutboundStatuses(25);
+    if (pending.length === 0) return;
+
+    for (const row of pending) {
+      try {
+        const status = await sendblueClient.getMessageStatus(row.message_handle);
+        const terminal = isTerminalSendblueStatus(status);
+
+        // Only log when it changes.
+        if (status && status !== row.status) {
+          log('info', `Status ${row.message_handle.slice(-8)}: ${row.status} -> ${status}`);
+        }
+
+        upsertOutboundMessageStatus({
+          messageHandle: row.message_handle,
+          chatId: row.chat_id,
+          status: status || row.status,
+          isTerminal: terminal,
+          lastChecked: Date.now(),
+        });
+      } catch (e) {
+        // Don't mark terminal; just update last_checked so we don't tight-loop on failures.
+        upsertOutboundMessageStatus({
+          messageHandle: row.message_handle,
+          chatId: row.chat_id,
+          status: row.status,
+          isTerminal: false,
+          lastChecked: Date.now(),
+        });
+      }
+    }
+  } finally {
+    isReconcilingStatus = false;
+  }
+}
+
 export function createSendblueChannel(api: any) {
   // Store api reference early for logging
   clawdbotApi = api;
@@ -341,13 +449,64 @@ export function createSendblueChannel(api: any) {
         }
 
         try {
-          await sendblueClient.sendMessage(chatId, text);
+          const result = await sendblueClient.sendMessage(chatId, text);
+
+          if (result?.messageId) {
+            upsertOutboundMessageStatus({
+              messageHandle: result.messageId,
+              chatId,
+              status: 'sent',
+              isTerminal: false,
+            });
+          }
+
           addConversationMessage(chatId, channelConfig!.phoneNumber, text, true);
           log('info', `Sent to ${chatId.slice(-4)}: "${text.substring(0, 50)}..."`);
           return { ok: true };
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : String(error);
           log('error', `Send error: ${errorMsg}`);
+          return { ok: false, error: errorMsg };
+        }
+      },
+
+      // OpenClaw's outbound delivery expects sendMedia to exist.
+      // We accept a mediaUrl (usually http(s)://...) then upload it to Sendblue.
+      sendMedia: async ({
+        text,
+        chatId,
+        mediaUrl,
+      }: {
+        text: string;
+        chatId: string;
+        mediaUrl: string;
+      }) => {
+        if (!sendblueClient) {
+          log('error', 'Client not initialized');
+          return { ok: false, error: 'Client not initialized' };
+        }
+
+        try {
+          const result = await sendblueClient.sendMessageWithAttachment(chatId, text ?? '', {
+            url: mediaUrl,
+          });
+
+          if (result?.messageId) {
+            upsertOutboundMessageStatus({
+              messageHandle: result.messageId,
+              chatId,
+              status: 'sent',
+              isTerminal: false,
+            });
+          }
+
+          const stored = text ? `${text}\n\n[Media: ${mediaUrl}]` : `[Media: ${mediaUrl}]`;
+          addConversationMessage(chatId, channelConfig!.phoneNumber, stored, true);
+          log('info', `Sent media to ${chatId.slice(-4)}`);
+          return { ok: true };
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          log('error', `Send media error: ${errorMsg}`);
           return { ok: false, error: errorMsg };
         }
       },

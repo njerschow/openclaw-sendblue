@@ -48,6 +48,16 @@ export interface ConversationMessage {
   is_outbound: boolean;
 }
 
+export interface OutboundMessageStatus {
+  message_handle: string;
+  chat_id: string;
+  status: string;
+  last_checked: number;
+  is_terminal: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
 // Chat summary
 export interface ChatInfo {
   chat_id: string;

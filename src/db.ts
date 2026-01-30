@@ -7,7 +7,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
-import type { ConversationMessage, ChatInfo } from './types.js';
+import type { ConversationMessage, ChatInfo, OutboundMessageStatus } from './types.js';
 
 const DB_DIR = path.join(os.homedir(), '.config', 'clawdbot-sendblue');
 const DB_PATH = path.join(DB_DIR, 'adapter.db');
@@ -40,12 +40,26 @@ export function initDb(): Database.Database {
       is_outbound INTEGER NOT NULL DEFAULT 0
     );
 
+    -- Track outbound message handles + status so we can reconcile delivery
+    CREATE TABLE IF NOT EXISTS outbound_message_status (
+      message_handle TEXT PRIMARY KEY,
+      chat_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      last_checked INTEGER NOT NULL,
+      is_terminal INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
     -- Indexes
     CREATE INDEX IF NOT EXISTS idx_conversations_chat
       ON conversations(chat_id, timestamp DESC);
 
     CREATE INDEX IF NOT EXISTS idx_processed_at
       ON processed_messages(processed_at);
+
+    CREATE INDEX IF NOT EXISTS idx_outbound_status_pending
+      ON outbound_message_status(is_terminal, last_checked);
   `);
 
   return db;
@@ -99,6 +113,74 @@ export function addConversationMessage(
   database.prepare(
     'INSERT INTO conversations (chat_id, from_number, content, timestamp, is_outbound) VALUES (?, ?, ?, ?, ?)'
   ).run(chatId, fromNumber, content, Date.now(), isOutbound ? 1 : 0);
+}
+
+// --- Outbound Status Tracking ---
+
+export function upsertOutboundMessageStatus(params: {
+  messageHandle: string;
+  chatId: string;
+  status: string;
+  isTerminal: boolean;
+  lastChecked?: number;
+}): void {
+  const database = initDb();
+  const now = Date.now();
+  const lastChecked = params.lastChecked ?? now;
+
+  database
+    .prepare(
+      `INSERT INTO outbound_message_status
+        (message_handle, chat_id, status, last_checked, is_terminal, created_at, updated_at)
+      VALUES
+        (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(message_handle) DO UPDATE SET
+        chat_id=excluded.chat_id,
+        status=excluded.status,
+        last_checked=excluded.last_checked,
+        is_terminal=excluded.is_terminal,
+        updated_at=excluded.updated_at`
+    )
+    .run(
+      params.messageHandle,
+      params.chatId,
+      params.status,
+      lastChecked,
+      params.isTerminal ? 1 : 0,
+      now,
+      now
+    );
+}
+
+export function listPendingOutboundStatuses(limit: number = 25): OutboundMessageStatus[] {
+  const database = initDb();
+  const rows = database
+    .prepare(
+      `SELECT message_handle, chat_id, status, last_checked, is_terminal, created_at, updated_at
+       FROM outbound_message_status
+       WHERE is_terminal = 0
+       ORDER BY last_checked ASC
+       LIMIT ?`
+    )
+    .all(limit) as Array<{
+    message_handle: string;
+    chat_id: string;
+    status: string;
+    last_checked: number;
+    is_terminal: number;
+    created_at: number;
+    updated_at: number;
+  }>;
+
+  return rows.map(r => ({
+    message_handle: r.message_handle,
+    chat_id: r.chat_id,
+    status: r.status,
+    last_checked: r.last_checked,
+    is_terminal: r.is_terminal === 1,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  }));
 }
 
 export function getConversationHistory(
