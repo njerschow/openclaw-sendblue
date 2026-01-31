@@ -9,7 +9,7 @@
     "dev": "tsx src/index.ts",
     "watch": "tsc --watch"
   },
-  "clawdbot": {
+  "openclaw": {
     "extensions": ["./dist/index.js"]
   },
   "dependencies": {
