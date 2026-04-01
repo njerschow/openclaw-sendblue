@@ -22,6 +22,7 @@ let sendblueClient: SendblueClient | null = null;
 let channelConfig: SendblueChannelConfig | null = null;
 let openclawApi: any = null;
 let webhookEnabled = false;
+let serviceRunning = false;
 
 // Logger helper - uses api.logger if available, falls back to console
 function log(level: 'info' | 'warn' | 'error', message: string): void {
@@ -51,7 +52,10 @@ function initializeService(api: any, config: SendblueChannelConfig): void {
   log('info', `Phone: ${config.phoneNumber}`);
   log('info', `Allowlist: ${config.allowFrom?.join(', ') || '(open)'}`);
 
-  // Cleanup old messages periodically
+  // Clear any existing cleanup interval before setting a new one
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval);
+  }
   cleanupInterval = setInterval(() => cleanupOldProcessedMessages(), 60 * 60 * 1000);
 }
 
@@ -129,8 +133,18 @@ async function stopAllServices(): Promise<void> {
 
 /**
  * Export for service registration
+ *
+ * Idempotent — if the service is already running we skip.  OpenClaw's
+ * gateway.start and service.start can both call this; the guard prevents
+ * duplicate pollers / webhook servers.
  */
 export function startSendblueService(api: any, config: SendblueChannelConfig): void {
+  if (serviceRunning) {
+    log('info', 'Service already running — skipping duplicate start');
+    return;
+  }
+  serviceRunning = true;
+
   initializeService(api, config);
 
   if (config.webhook?.enabled) {
@@ -144,6 +158,7 @@ export function startSendblueService(api: any, config: SendblueChannelConfig): v
 
 export async function stopSendblueService(): Promise<void> {
   await stopAllServices();
+  serviceRunning = false;
 }
 
 /**
