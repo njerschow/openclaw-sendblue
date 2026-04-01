@@ -137,13 +137,15 @@ async function stopAllServices(): Promise<void> {
  * Idempotent — if the service is already running we skip.  OpenClaw's
  * gateway.start and service.start can both call this; the guard prevents
  * duplicate pollers / webhook servers.
+ *
+ * The flag is set only after all fallible work completes so a failed start
+ * does not permanently lock out retries.
  */
 export function startSendblueService(api: any, config: SendblueChannelConfig): void {
   if (serviceRunning) {
     log('info', 'Service already running — skipping duplicate start');
     return;
   }
-  serviceRunning = true;
 
   initializeService(api, config);
 
@@ -154,11 +156,18 @@ export function startSendblueService(api: any, config: SendblueChannelConfig): v
     startPolling();
     log('info', 'Using polling mode for messages');
   }
+
+  // Only mark running after all init succeeded — a throw above leaves the
+  // flag false so the next call can retry.
+  serviceRunning = true;
 }
 
 export async function stopSendblueService(): Promise<void> {
-  await stopAllServices();
-  serviceRunning = false;
+  try {
+    await stopAllServices();
+  } finally {
+    serviceRunning = false;
+  }
 }
 
 /**
