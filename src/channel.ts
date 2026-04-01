@@ -118,6 +118,7 @@ function stopPolling(): void {
  */
 async function stopAllServices(): Promise<void> {
   stopPolling();
+  isPolling = false;
 
   if (webhookEnabled) {
     log('info', 'Stopping webhook server...');
@@ -135,8 +136,8 @@ async function stopAllServices(): Promise<void> {
  * Export for service registration
  *
  * Idempotent — if the service is already running we skip.  OpenClaw's
- * gateway.start and service.start can both call this; the guard prevents
- * duplicate pollers / webhook servers.
+ * gateway.startAccount and service.start can both call this; the guard
+ * prevents duplicate pollers / webhook servers.
  *
  * The flag is set only after all fallible work completes so a failed start
  * does not permanently lock out retries.
@@ -325,6 +326,16 @@ async function processMessage(msg: SendblueMessage): Promise<void> {
 }
 
 /**
+ * Resolve the Sendblue config from the full OpenClaw config.
+ * Checks plugins.entries.sendblue.config first, then channels.sendblue.
+ */
+function resolveSendblueConfig(cfg: any): SendblueChannelConfig | null {
+  return cfg?.plugins?.entries?.sendblue?.config
+    ?? cfg?.channels?.sendblue
+    ?? null;
+}
+
+/**
  * Create the Sendblue channel plugin
  */
 export function createSendblueChannel(api: any) {
@@ -343,11 +354,11 @@ export function createSendblueChannel(api: any) {
       aliases: ['imessage', 'sms'],
     },
 
-    // Configuration handlers
+    // Configuration handlers (ChannelConfigAdapter)
     config: {
       listAccountIds: (_cfg: any) => ['default'],
-      resolveAccount: (cfg: any, _accountId: string) =>
-        cfg.plugins?.entries?.sendblue?.config ?? cfg.channels?.sendblue ?? cfg,
+      resolveAccount: (cfg: any, _accountId?: string | null) =>
+        resolveSendblueConfig(cfg),
     },
 
     // Capabilities
@@ -355,36 +366,43 @@ export function createSendblueChannel(api: any) {
       chatTypes: ['direct'],
     },
 
-    // Message delivery
+    // Message delivery (ChannelOutboundAdapter)
+    // sendText receives ChannelOutboundContext: { cfg, to, text, mediaUrl, ... }
+    // Must return OutboundDeliveryResult: { channel, messageId, ... }
     outbound: {
       deliveryMode: 'direct',
-      sendText: async ({ text, chatId }: { text: string; chatId: string }) => {
+      sendText: async (ctx: { cfg: any; to: string; text: string; mediaUrl?: string }) => {
         if (!sendblueClient) {
           log('error', 'Client not initialized');
-          return { ok: false, error: 'Client not initialized' };
+          throw new Error('Client not initialized');
         }
 
-        try {
-          await sendblueClient.sendMessage(chatId, text);
-          addConversationMessage(chatId, channelConfig!.phoneNumber, text, true);
-          log('info', `Sent to ${chatId.slice(-4)}: "${text.substring(0, 50)}..."`);
-          return { ok: true };
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          log('error', `Send error: ${errorMsg}`);
-          return { ok: false, error: errorMsg };
-        }
+        const result = await sendblueClient.sendMessage(ctx.to, ctx.text);
+        addConversationMessage(ctx.to, channelConfig!.phoneNumber, ctx.text, true);
+        log('info', `Sent to ${ctx.to.slice(-4)}: "${ctx.text.substring(0, 50)}..."`);
+        return {
+          channel: 'sendblue',
+          messageId: result?.messageId || `sb-${Date.now()}`,
+          chatId: ctx.to,
+          timestamp: Date.now(),
+        };
       },
     },
 
-    // Gateway adapter for lifecycle
+    // Gateway adapter (ChannelGatewayAdapter)
+    // startAccount/stopAccount receive ChannelGatewayContext:
+    //   { cfg, accountId, account (ResolvedAccount), runtime, abortSignal, log, ... }
     gateway: {
-      start: async (...args: any[]) => {
-        log('info', `gateway.start called with ${args.length} args`);
-        const config = args[0] as SendblueChannelConfig;
-        startSendblueService(api, config);
+      startAccount: async (ctx: any) => {
+        log('info', `gateway.startAccount called for account=${ctx?.accountId}`);
+        const config = ctx?.account ?? resolveSendblueConfig(ctx?.cfg);
+        if (config) {
+          startSendblueService(api, config);
+        } else {
+          log('warn', 'gateway.startAccount: no config resolved');
+        }
       },
-      stop: async () => {
+      stopAccount: async () => {
         log('info', 'Channel stopping...');
         await stopSendblueService();
       },

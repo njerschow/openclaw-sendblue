@@ -7,10 +7,8 @@
 import { createSendblueChannel, startSendblueService, stopSendblueService } from './channel.js';
 
 // Idempotency guard — OpenClaw's plugin reconciler may call register() multiple
-// times during idle runtime.  We must only register channel + service once per
-// api instance.  Keyed on the api object so a fresh api (hot-reload / re-register
-// after unload) is allowed through.
-let registeredApi: any = null;
+// times during idle runtime.  We must only register channel + service once.
+let registered = false;
 
 /**
  * Plugin entry point
@@ -19,11 +17,10 @@ let registeredApi: any = null;
 export default function register(api: any) {
   const log = api.logger || console;
 
-  if (registeredApi === api) {
+  if (registered) {
     log.info('[Sendblue Plugin] Already registered — skipping duplicate register() call');
     return;
   }
-  registeredApi = api;
 
   log.info('[Sendblue Plugin] Registering channel...');
 
@@ -32,12 +29,15 @@ export default function register(api: any) {
 
   log.info('[Sendblue Plugin] Channel registered');
 
-  // Register service to handle polling lifecycle
+  // Register service to handle polling lifecycle.
+  // start/stop receive OpenClawPluginServiceContext with fresh config.
   api.registerService({
     id: 'sendblue-poller',
-    start: () => {
+    start: (ctx: any) => {
       log.info('[Sendblue Plugin] Service starting...');
-      const config = api.pluginConfig;
+      const config = ctx?.config?.plugins?.entries?.sendblue?.config
+        ?? ctx?.config?.channels?.sendblue
+        ?? api.pluginConfig;
       if (config) {
         startSendblueService(api, config);
       } else {
@@ -50,5 +50,6 @@ export default function register(api: any) {
     },
   });
 
+  registered = true;
   log.info('[Sendblue Plugin] Service registered');
 }
