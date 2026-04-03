@@ -6,6 +6,7 @@
 import { SendblueClient } from './sendblue.js';
 import {
   initDb,
+  closeDb,
   tryMarkMessageProcessed,
   addConversationMessage,
   cleanupOldProcessedMessages,
@@ -114,15 +115,20 @@ function stopPolling(): void {
 }
 
 /**
- * Stop all services (polling, webhook, cleanup)
+ * Stop all services (polling, webhook, cleanup).
+ * Each step is wrapped individually so a failure in one doesn't skip the rest.
  */
 async function stopAllServices(): Promise<void> {
   stopPolling();
   isPolling = false;
 
   if (webhookEnabled) {
-    log('info', 'Stopping webhook server...');
-    await stopWebhookServer();
+    try {
+      log('info', 'Stopping webhook server...');
+      await stopWebhookServer();
+    } catch (e) {
+      log('error', `Webhook stop error: ${e instanceof Error ? e.message : String(e)}`);
+    }
     webhookEnabled = false;
   }
 
@@ -130,6 +136,16 @@ async function stopAllServices(): Promise<void> {
     clearInterval(cleanupInterval);
     cleanupInterval = null;
   }
+
+  // Close the SQLite database
+  try {
+    closeDb();
+  } catch (e) {
+    log('error', `DB close error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // Null out client so outbound sends on a stopped service fail cleanly
+  sendblueClient = null;
 }
 
 /**
@@ -171,6 +187,12 @@ export async function stopSendblueService(): Promise<void> {
   }
 }
 
+/** Allow index.ts to reset the registration guard on full teardown. */
+export function resetRegistration(): void {
+  // no-op on service state — stopSendblueService handles that.
+  // This exists so the register() idempotency flag can be cleared externally.
+}
+
 /**
  * Check if a phone number is allowed
  */
@@ -202,11 +224,15 @@ async function poll(): Promise<void> {
   try {
     isPolling = true;
     const messages = await sendblueClient.getInboundMessages(lastPollTime);
-    lastPollTime = new Date();
 
     for (const msg of messages) {
       await processMessage(msg);
     }
+
+    // Advance lastPollTime only after all messages are processed successfully.
+    // If processMessage throws mid-batch, we'll re-fetch (dedup DB prevents
+    // double-processing of the ones that did succeed).
+    lastPollTime = new Date();
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     log('error', `Poll error: ${errorMsg}`);
@@ -336,6 +362,29 @@ function resolveSendblueConfig(cfg: any): SendblueChannelConfig | null {
 }
 
 /**
+ * Shared helper to send a message and return OutboundDeliveryResult.
+ */
+async function sendOutbound(
+  to: string,
+  text: string,
+  mediaUrl?: string,
+): Promise<{ channel: string; messageId: string; chatId: string; timestamp: number }> {
+  if (!sendblueClient) {
+    throw new Error('Client not initialized');
+  }
+
+  const result = await sendblueClient.sendMessage(to, text, mediaUrl);
+  addConversationMessage(to, channelConfig!.phoneNumber, text, true);
+  log('info', `Sent to ${to.slice(-4)}: "${text.substring(0, 50)}..."`);
+  return {
+    channel: 'sendblue',
+    messageId: result?.messageId || `sb-${Date.now()}`,
+    chatId: to,
+    timestamp: Date.now(),
+  };
+}
+
+/**
  * Create the Sendblue channel plugin
  */
 export function createSendblueChannel(api: any) {
@@ -367,25 +416,15 @@ export function createSendblueChannel(api: any) {
     },
 
     // Message delivery (ChannelOutboundAdapter)
-    // sendText receives ChannelOutboundContext: { cfg, to, text, mediaUrl, ... }
-    // Must return OutboundDeliveryResult: { channel, messageId, ... }
+    // Both sendText and sendMedia are required — OpenClaw guards:
+    //   if (!outbound?.sendText || !outbound?.sendMedia) return null;
     outbound: {
       deliveryMode: 'direct',
       sendText: async (ctx: { cfg: any; to: string; text: string; mediaUrl?: string }) => {
-        if (!sendblueClient) {
-          log('error', 'Client not initialized');
-          throw new Error('Client not initialized');
-        }
-
-        const result = await sendblueClient.sendMessage(ctx.to, ctx.text);
-        addConversationMessage(ctx.to, channelConfig!.phoneNumber, ctx.text, true);
-        log('info', `Sent to ${ctx.to.slice(-4)}: "${ctx.text.substring(0, 50)}..."`);
-        return {
-          channel: 'sendblue',
-          messageId: result?.messageId || `sb-${Date.now()}`,
-          chatId: ctx.to,
-          timestamp: Date.now(),
-        };
+        return sendOutbound(ctx.to, ctx.text, ctx.mediaUrl);
+      },
+      sendMedia: async (ctx: { cfg: any; to: string; text: string; mediaUrl?: string }) => {
+        return sendOutbound(ctx.to, ctx.text, ctx.mediaUrl);
       },
     },
 

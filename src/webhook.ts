@@ -273,18 +273,25 @@ export function stopWebhookServer(): Promise<void> {
     }
 
     const ref = server;
+    let resolved = false;
+
+    const done = () => {
+      if (resolved) return;
+      resolved = true;
+      server = null;
+      resolve();
+    };
 
     // Timeout so we don't hang forever if server.close() never fires
     const timeout = setTimeout(() => {
       ref.closeAllConnections?.();
-      server = null;
-      resolve();
+      ref.close(() => { /* ensure fd is released */ });
+      done();
     }, 5000);
 
     ref.close(() => {
       clearTimeout(timeout);
-      server = null;
-      resolve();
+      done();
     });
   });
 }

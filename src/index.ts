@@ -11,6 +11,16 @@ import { createSendblueChannel, startSendblueService, stopSendblueService } from
 let registered = false;
 
 /**
+ * Resolve Sendblue config from the full OpenClaw config.
+ * Single source of truth — used by both service.start and gateway.startAccount.
+ */
+function resolveSendblueConfig(cfg: any): any {
+  return cfg?.plugins?.entries?.sendblue?.config
+    ?? cfg?.channels?.sendblue
+    ?? null;
+}
+
+/**
  * Plugin entry point
  * Called by openclaw to register the plugin
  */
@@ -35,9 +45,7 @@ export default function register(api: any) {
     id: 'sendblue-poller',
     start: (ctx: any) => {
       log.info('[Sendblue Plugin] Service starting...');
-      const config = ctx?.config?.plugins?.entries?.sendblue?.config
-        ?? ctx?.config?.channels?.sendblue
-        ?? api.pluginConfig;
+      const config = resolveSendblueConfig(ctx?.config) ?? api.pluginConfig;
       if (config) {
         startSendblueService(api, config);
       } else {
@@ -47,6 +55,8 @@ export default function register(api: any) {
     stop: async () => {
       log.info('[Sendblue Plugin] Service stopping...');
       await stopSendblueService();
+      // Reset registration so a subsequent register() call (plugin reload) works
+      registered = false;
     },
   });
 
