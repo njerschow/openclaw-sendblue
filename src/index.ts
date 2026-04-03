@@ -6,12 +6,31 @@
 
 import { createSendblueChannel, startSendblueService, stopSendblueService } from './channel.js';
 
+// Idempotency guard — OpenClaw's plugin reconciler may call register() multiple
+// times during idle runtime.  We must only register channel + service once.
+let registered = false;
+
+/**
+ * Resolve Sendblue config from the full OpenClaw config.
+ * Single source of truth — used by both service.start and gateway.startAccount.
+ */
+function resolveSendblueConfig(cfg: any): any {
+  return cfg?.plugins?.entries?.sendblue?.config
+    ?? cfg?.channels?.sendblue
+    ?? null;
+}
+
 /**
  * Plugin entry point
  * Called by openclaw to register the plugin
  */
 export default function register(api: any) {
   const log = api.logger || console;
+
+  if (registered) {
+    log.info('[Sendblue Plugin] Already registered — skipping duplicate register() call');
+    return;
+  }
 
   log.info('[Sendblue Plugin] Registering channel...');
 
@@ -20,23 +39,27 @@ export default function register(api: any) {
 
   log.info('[Sendblue Plugin] Channel registered');
 
-  // Register service to handle polling lifecycle
+  // Register service to handle polling lifecycle.
+  // start/stop receive OpenClawPluginServiceContext with fresh config.
   api.registerService({
     id: 'sendblue-poller',
-    start: () => {
+    start: (ctx: any) => {
       log.info('[Sendblue Plugin] Service starting...');
-      const config = api.pluginConfig;
+      const config = resolveSendblueConfig(ctx?.config) ?? api.pluginConfig;
       if (config) {
         startSendblueService(api, config);
       } else {
         log.warn('[Sendblue Plugin] No config found, service not started');
       }
     },
-    stop: () => {
+    stop: async () => {
       log.info('[Sendblue Plugin] Service stopping...');
-      stopSendblueService();
+      await stopSendblueService();
+      // Reset registration so a subsequent register() call (plugin reload) works
+      registered = false;
     },
   });
 
+  registered = true;
   log.info('[Sendblue Plugin] Service registered');
 }

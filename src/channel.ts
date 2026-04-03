@@ -6,6 +6,7 @@
 import { SendblueClient } from './sendblue.js';
 import {
   initDb,
+  closeDb,
   tryMarkMessageProcessed,
   addConversationMessage,
   cleanupOldProcessedMessages,
@@ -22,6 +23,7 @@ let sendblueClient: SendblueClient | null = null;
 let channelConfig: SendblueChannelConfig | null = null;
 let openclawApi: any = null;
 let webhookEnabled = false;
+let serviceRunning = false;
 
 // Logger helper - uses api.logger if available, falls back to console
 function log(level: 'info' | 'warn' | 'error', message: string): void {
@@ -51,7 +53,10 @@ function initializeService(api: any, config: SendblueChannelConfig): void {
   log('info', `Phone: ${config.phoneNumber}`);
   log('info', `Allowlist: ${config.allowFrom?.join(', ') || '(open)'}`);
 
-  // Cleanup old messages periodically
+  // Clear any existing cleanup interval before setting a new one
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval);
+  }
   cleanupInterval = setInterval(() => cleanupOldProcessedMessages(), 60 * 60 * 1000);
 }
 
@@ -110,14 +115,20 @@ function stopPolling(): void {
 }
 
 /**
- * Stop all services (polling, webhook, cleanup)
+ * Stop all services (polling, webhook, cleanup).
+ * Each step is wrapped individually so a failure in one doesn't skip the rest.
  */
 async function stopAllServices(): Promise<void> {
   stopPolling();
+  isPolling = false;
 
   if (webhookEnabled) {
-    log('info', 'Stopping webhook server...');
-    await stopWebhookServer();
+    try {
+      log('info', 'Stopping webhook server...');
+      await stopWebhookServer();
+    } catch (e) {
+      log('error', `Webhook stop error: ${e instanceof Error ? e.message : String(e)}`);
+    }
     webhookEnabled = false;
   }
 
@@ -125,12 +136,34 @@ async function stopAllServices(): Promise<void> {
     clearInterval(cleanupInterval);
     cleanupInterval = null;
   }
+
+  // Close the SQLite database
+  try {
+    closeDb();
+  } catch (e) {
+    log('error', `DB close error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // Null out client so outbound sends on a stopped service fail cleanly
+  sendblueClient = null;
 }
 
 /**
  * Export for service registration
+ *
+ * Idempotent — if the service is already running we skip.  OpenClaw's
+ * gateway.startAccount and service.start can both call this; the guard
+ * prevents duplicate pollers / webhook servers.
+ *
+ * The flag is set only after all fallible work completes so a failed start
+ * does not permanently lock out retries.
  */
 export function startSendblueService(api: any, config: SendblueChannelConfig): void {
+  if (serviceRunning) {
+    log('info', 'Service already running — skipping duplicate start');
+    return;
+  }
+
   initializeService(api, config);
 
   if (config.webhook?.enabled) {
@@ -140,10 +173,24 @@ export function startSendblueService(api: any, config: SendblueChannelConfig): v
     startPolling();
     log('info', 'Using polling mode for messages');
   }
+
+  // Only mark running after all init succeeded — a throw above leaves the
+  // flag false so the next call can retry.
+  serviceRunning = true;
 }
 
 export async function stopSendblueService(): Promise<void> {
-  await stopAllServices();
+  try {
+    await stopAllServices();
+  } finally {
+    serviceRunning = false;
+  }
+}
+
+/** Allow index.ts to reset the registration guard on full teardown. */
+export function resetRegistration(): void {
+  // no-op on service state — stopSendblueService handles that.
+  // This exists so the register() idempotency flag can be cleared externally.
 }
 
 /**
@@ -177,11 +224,15 @@ async function poll(): Promise<void> {
   try {
     isPolling = true;
     const messages = await sendblueClient.getInboundMessages(lastPollTime);
-    lastPollTime = new Date();
 
     for (const msg of messages) {
       await processMessage(msg);
     }
+
+    // Advance lastPollTime only after all messages are processed successfully.
+    // If processMessage throws mid-batch, we'll re-fetch (dedup DB prevents
+    // double-processing of the ones that did succeed).
+    lastPollTime = new Date();
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     log('error', `Poll error: ${errorMsg}`);
@@ -301,6 +352,39 @@ async function processMessage(msg: SendblueMessage): Promise<void> {
 }
 
 /**
+ * Resolve the Sendblue config from the full OpenClaw config.
+ * Checks plugins.entries.sendblue.config first, then channels.sendblue.
+ */
+function resolveSendblueConfig(cfg: any): SendblueChannelConfig | null {
+  return cfg?.plugins?.entries?.sendblue?.config
+    ?? cfg?.channels?.sendblue
+    ?? null;
+}
+
+/**
+ * Shared helper to send a message and return OutboundDeliveryResult.
+ */
+async function sendOutbound(
+  to: string,
+  text: string,
+  mediaUrl?: string,
+): Promise<{ channel: string; messageId: string; chatId: string; timestamp: number }> {
+  if (!sendblueClient) {
+    throw new Error('Client not initialized');
+  }
+
+  const result = await sendblueClient.sendMessage(to, text, mediaUrl);
+  addConversationMessage(to, channelConfig!.phoneNumber, text, true);
+  log('info', `Sent to ${to.slice(-4)}: "${text.substring(0, 50)}..."`);
+  return {
+    channel: 'sendblue',
+    messageId: result?.messageId || `sb-${Date.now()}`,
+    chatId: to,
+    timestamp: Date.now(),
+  };
+}
+
+/**
  * Create the Sendblue channel plugin
  */
 export function createSendblueChannel(api: any) {
@@ -319,11 +403,11 @@ export function createSendblueChannel(api: any) {
       aliases: ['imessage', 'sms'],
     },
 
-    // Configuration handlers
+    // Configuration handlers (ChannelConfigAdapter)
     config: {
       listAccountIds: (_cfg: any) => ['default'],
-      resolveAccount: (cfg: any, _accountId: string) =>
-        cfg.plugins?.entries?.sendblue?.config ?? cfg.channels?.sendblue ?? cfg,
+      resolveAccount: (cfg: any, _accountId?: string | null) =>
+        resolveSendblueConfig(cfg),
     },
 
     // Capabilities
@@ -331,36 +415,33 @@ export function createSendblueChannel(api: any) {
       chatTypes: ['direct'],
     },
 
-    // Message delivery
+    // Message delivery (ChannelOutboundAdapter)
+    // Both sendText and sendMedia are required — OpenClaw guards:
+    //   if (!outbound?.sendText || !outbound?.sendMedia) return null;
     outbound: {
       deliveryMode: 'direct',
-      sendText: async ({ text, chatId }: { text: string; chatId: string }) => {
-        if (!sendblueClient) {
-          log('error', 'Client not initialized');
-          return { ok: false, error: 'Client not initialized' };
-        }
-
-        try {
-          await sendblueClient.sendMessage(chatId, text);
-          addConversationMessage(chatId, channelConfig!.phoneNumber, text, true);
-          log('info', `Sent to ${chatId.slice(-4)}: "${text.substring(0, 50)}..."`);
-          return { ok: true };
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          log('error', `Send error: ${errorMsg}`);
-          return { ok: false, error: errorMsg };
-        }
+      sendText: async (ctx: { cfg: any; to: string; text: string; mediaUrl?: string }) => {
+        return sendOutbound(ctx.to, ctx.text, ctx.mediaUrl);
+      },
+      sendMedia: async (ctx: { cfg: any; to: string; text: string; mediaUrl?: string }) => {
+        return sendOutbound(ctx.to, ctx.text, ctx.mediaUrl);
       },
     },
 
-    // Gateway adapter for lifecycle
+    // Gateway adapter (ChannelGatewayAdapter)
+    // startAccount/stopAccount receive ChannelGatewayContext:
+    //   { cfg, accountId, account (ResolvedAccount), runtime, abortSignal, log, ... }
     gateway: {
-      start: async (...args: any[]) => {
-        log('info', `gateway.start called with ${args.length} args`);
-        const config = args[0] as SendblueChannelConfig;
-        startSendblueService(api, config);
+      startAccount: async (ctx: any) => {
+        log('info', `gateway.startAccount called for account=${ctx?.accountId}`);
+        const config = ctx?.account ?? resolveSendblueConfig(ctx?.cfg);
+        if (config) {
+          startSendblueService(api, config);
+        } else {
+          log('warn', 'gateway.startAccount: no config resolved');
+        }
       },
-      stop: async () => {
+      stopAccount: async () => {
         log('info', 'Channel stopping...');
         await stopSendblueService();
       },
