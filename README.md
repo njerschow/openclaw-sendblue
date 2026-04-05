@@ -1,6 +1,8 @@
 # openclaw-sendblue
 
-Text your [openclaw](https://openclaw.ai) via iMessage or SMS.
+Text your [openclaw](https://openclaw.ai) via iMessage or SMS, powered by [Sendblue](https://sendblue.com).
+
+> **Also want Claude + iMessage without OpenClaw?** See [Alternative: Claude Code + Sendblue MCP](#alternative-claude-code--sendblue-mcp) below for a one-command setup.
 
 ## Quick Start
 
@@ -60,6 +62,38 @@ openclaw gateway restart
 ```
 
 Now text the Sendblue number from your phone. You should get a reply from openclaw!
+
+---
+
+## Alternative: Claude Code + Sendblue MCP
+
+Don't need OpenClaw? You can give Claude Code iMessage/SMS capabilities directly with one command:
+
+```bash
+claude mcp add sendblue_api \
+  --env SENDBLUE_API_API_KEY=your-api-key \
+  --env SENDBLUE_API_API_SECRET=your-api-secret \
+  -- npx -y sendblue-api-mcp --client=claude-code --tools=all
+```
+
+This adds the [Sendblue MCP server](https://docs.sendblue.com/mcp/) to Claude Code, giving it tools to send/receive iMessages, check number types, send group messages, and more — all from within your coding session.
+
+**Or for Claude Desktop**, add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "sendblue_api": {
+      "command": "npx",
+      "args": ["-y", "sendblue-api-mcp", "--client=claude", "--tools=all"],
+      "env": {
+        "SENDBLUE_API_API_KEY": "your-api-key",
+        "SENDBLUE_API_API_SECRET": "your-api-secret"
+      }
+    }
+  }
+}
+```
 
 ---
 
