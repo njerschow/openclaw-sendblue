@@ -6,14 +6,31 @@ Text your [openclaw](https://openclaw.ai) via iMessage or SMS, powered by [Sendb
 
 ## Quick Start
 
-### 1. Create a Sendblue Account
+### 1. Get Your Sendblue Credentials
 
-1. Go to [sendblue.com/api](https://sendblue.com/api) and click **"Try for free"**
-2. After signing up, **verify your phone number** in the dashboard (required for free tier)
-3. Find these three things in your dashboard:
-   - **API Key**
-   - **API Secret**
-   - **Your Sendblue phone number** (e.g., `+15551234567`)
+Install the [Sendblue CLI](https://sendblue.com/cli):
+
+```bash
+npm install -g @sendblue/cli
+sendblue setup
+```
+
+This creates your account, assigns a phone number, and walks you through verifying your first contact. When done, print your credentials:
+
+```bash
+sendblue show-keys
+```
+
+Copy the **API Key**, **API Secret**, and **phone number** — you'll need all three in Step 3.
+
+<details>
+<summary>Already have an account? (dashboard method)</summary>
+
+1. Go to [dashboard.sendblue.com](https://dashboard.sendblue.com)
+2. **Settings → API Settings** — copy your **API Key** and **API Secret**
+3. **Settings → Phone Lines** — copy your **Sendblue phone number**
+
+</details>
 
 ### 2. Install the Plugin
 
@@ -48,12 +65,12 @@ Add this to `~/.openclaw/openclaw.json`:
 **Replace:**
 | Field | What to put |
 |-------|-------------|
-| `apiKey` | Your Sendblue API key |
-| `apiSecret` | Your Sendblue API secret |
-| `phoneNumber` | The Sendblue number (from your dashboard) |
-| `allowFrom` | **Your phone number** (the one you'll text from) |
+| `apiKey` | Your Sendblue API key (from `sendblue show-keys`) |
+| `apiSecret` | Your Sendblue API secret (from `sendblue show-keys`) |
+| `phoneNumber` | The Sendblue number assigned to you (from `sendblue show-keys`) |
+| `allowFrom` | **Your personal phone number** — the one you'll text from |
 
-Phone numbers must start with `+1` (e.g., `+15551234567`).
+Phone numbers must use E.164 format (e.g., `+15551234567`).
 
 ### 4. Restart & Test
 
@@ -61,7 +78,7 @@ Phone numbers must start with `+1` (e.g., `+15551234567`).
 openclaw gateway restart
 ```
 
-Now text the Sendblue number from your phone. You should get a reply from openclaw!
+Text the Sendblue number from your phone. You should get a reply from openclaw!
 
 ---
 
@@ -102,7 +119,7 @@ This adds the [Sendblue MCP server](https://docs.sendblue.com/mcp/) to Claude Co
 **No response?**
 - Make sure you're texting **from** the number in `allowFrom`
 - Check logs: `openclaw logs`
-- Verify your API credentials are correct
+- Verify your API credentials are correct (`sendblue show-keys`)
 
 **"Unknown channel id" error?**
 - Run `npm run build` in the plugin folder
@@ -139,8 +156,8 @@ By default, the plugin checks for messages every 5 seconds. For instant delivery
 
 **Setup:**
 1. Expose port 3141 to the internet (use ngrok, Cloudflare Tunnel, or a public server)
-2. In your Sendblue dashboard, set the webhook URL to `https://your-server/webhook/sendblue`
-3. In Sendblue, set the same `secret` value for webhook authentication
+2. In your [Sendblue dashboard](https://dashboard.sendblue.com), set the webhook URL to `https://your-server/webhook/sendblue`
+3. Set the same `secret` value for webhook authentication
 
 **Security notes:**
 - **Always set a secret** - Without it, anyone can send fake messages to your webhook
@@ -164,6 +181,6 @@ By default, the plugin checks for messages every 5 seconds. For instant delivery
 
 ---
 
-## License
+Built with [Sendblue](https://sendblue.com/cli) + [openclaw](https://openclaw.ai)
 
-MIT
+MIT License
