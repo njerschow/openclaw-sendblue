@@ -13,6 +13,7 @@ import {
 } from './db.js';
 import { startWebhookServer, stopWebhookServer } from './webhook.js';
 import type { SendblueChannelConfig, SendblueMessage } from './types.js';
+import { pluginState } from './state.js';
 
 // State
 let pollInterval: NodeJS.Timeout | null = null;
@@ -23,7 +24,6 @@ let sendblueClient: SendblueClient | null = null;
 let channelConfig: SendblueChannelConfig | null = null;
 let openclawApi: any = null;
 let webhookEnabled = false;
-let serviceRunning = false;
 
 // Logger helper - uses api.logger if available, falls back to console
 function log(level: 'info' | 'warn' | 'error', message: string): void {
@@ -159,7 +159,7 @@ async function stopAllServices(): Promise<void> {
  * does not permanently lock out retries.
  */
 export function startSendblueService(api: any, config: SendblueChannelConfig): void {
-  if (serviceRunning) {
+  if (pluginState.serviceRunning) {
     log('info', 'Service already running — skipping duplicate start');
     return;
   }
@@ -176,14 +176,14 @@ export function startSendblueService(api: any, config: SendblueChannelConfig): v
 
   // Only mark running after all init succeeded — a throw above leaves the
   // flag false so the next call can retry.
-  serviceRunning = true;
+  pluginState.serviceRunning = true;
 }
 
 export async function stopSendblueService(): Promise<void> {
   try {
     await stopAllServices();
   } finally {
-    serviceRunning = false;
+    pluginState.serviceRunning = false;
   }
 }
 
