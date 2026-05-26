@@ -4,6 +4,62 @@
   "description": "Send and receive iMessages/SMS via Sendblue API",
   "version": "1.0.0",
   "channels": ["sendblue"],
+  "channelConfigs": {
+    "sendblue": {
+      "label": "Sendblue",
+      "description": "Send and receive iMessages/SMS via Sendblue API",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "apiKey": { "type": "string" },
+          "apiSecret": { "type": "string" },
+          "phoneNumber": { "type": "string" },
+          "allowFrom": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "pollIntervalMs": { "type": "number", "default": 5000 },
+          "dmPolicy": {
+            "type": "string",
+            "enum": ["allowlist", "open", "disabled"],
+            "default": "allowlist"
+          },
+          "webhook": {
+            "type": "object",
+            "properties": {
+              "enabled": { "type": "boolean", "default": false },
+              "port": { "type": "number", "default": 3141 },
+              "path": { "type": "string", "default": "/webhook/sendblue" },
+              "secret": { "type": "string" },
+              "rateLimit": {
+                "type": "object",
+                "properties": {
+                  "windowMs": { "type": "number", "default": 60000 },
+                  "maxRequests": { "type": "number", "default": 60 }
+                }
+              }
+            }
+          }
+        },
+        "required": ["apiKey", "apiSecret", "phoneNumber"]
+      },
+      "uiHints": {
+        "apiKey": { "label": "Sendblue API Key", "sensitive": true },
+        "apiSecret": { "label": "Sendblue API Secret", "sensitive": true },
+        "phoneNumber": { "label": "Sendblue Phone Number" },
+        "allowFrom": { "label": "Allowed Phone Numbers (E.164 format)" },
+        "pollIntervalMs": { "label": "Poll Interval (ms)" },
+        "dmPolicy": { "label": "DM Policy" },
+        "webhook.enabled": { "label": "Enable Webhook Server" },
+        "webhook.port": { "label": "Webhook Port" },
+        "webhook.path": { "label": "Webhook Path" },
+        "webhook.secret": { "label": "Webhook Secret", "sensitive": true },
+        "webhook.rateLimit.windowMs": { "label": "Rate Limit Window (ms)" },
+        "webhook.rateLimit.maxRequests": { "label": "Max Requests per Window" }
+      }
+    }
+  },
   "configSchema": {
     "type": "object",
     "properties": {

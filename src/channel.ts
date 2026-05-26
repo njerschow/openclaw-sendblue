@@ -361,6 +361,20 @@ function resolveSendblueConfig(cfg: any): SendblueChannelConfig | null {
     ?? null;
 }
 
+function waitUntilAbort(signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    return new Promise(() => {});
+  }
+
+  if (signal.aborted) {
+    return Promise.resolve();
+  }
+
+  return new Promise<void>((resolve) => {
+    signal.addEventListener('abort', () => resolve(), { once: true });
+  });
+}
+
 /**
  * Shared helper to send a message and return OutboundDeliveryResult.
  */
@@ -440,6 +454,8 @@ export function createSendblueChannel(api: any) {
         } else {
           log('warn', 'gateway.startAccount: no config resolved');
         }
+
+        await waitUntilAbort(ctx?.abortSignal);
       },
       stopAccount: async () => {
         log('info', 'Channel stopping...');
